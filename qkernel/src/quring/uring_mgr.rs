@@ -278,6 +278,12 @@ impl QUring {
     }
 
     pub fn Process(&self, cqe: &cqueue::Entry) {
+        use super::super::SHARESPACE;
+        use super::super::qlib::vcpu_mgr::*;
+
+        SHARESPACE.SetValue(CPULocal::CpuId(), 0, 200);
+        defer!(SHARESPACE.SetValue(CPULocal::CpuId(), 0, 201));
+
         let data = cqe.user_data();
         let ret = cqe.result();
 
@@ -320,7 +326,15 @@ impl QUring {
         loop {
             match self.asyncMgr.lock().AllocSlot() {
                 None => {
-                    error!("AUCall async slots usage up...");
+                    use super::super::SHARESPACE;
+                    {
+                        error!("AllocSlot debug");
+                        for i in 0..8 {
+                            error!("vcpu[{}] state is {}/{}", i, SHARESPACE.GetValue(i, 0), SHARESPACE.GetValue(i, 1))
+                        }
+                    }
+                    error!("AUCall async slots usage up... {}", SHARESPACE.GetValue(0, 0));
+                    //panic!("AUCall async slots usage up... val is {}", );
                 },
                 Some(idx) => {
                     id = idx;

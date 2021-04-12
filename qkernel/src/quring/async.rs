@@ -69,6 +69,11 @@ impl AsyncOps {
     }
 
     pub fn Process(mut self, result: i32) {
+        use super::super::SHARESPACE;
+        use super::super::qlib::vcpu_mgr::*;
+
+        SHARESPACE.SetValue(CPULocal::CpuId(), 0, self.Type() as u64 + 100);
+
         let ret = match &mut self {
             AsyncOps::AsyncTimeout(ref mut msg) => msg.Process(result),
             AsyncOps::AsyncTTTYWrite(ref mut msg) => msg.Process(result),
@@ -84,9 +89,12 @@ impl AsyncOps {
             AsyncOps::None => panic!("AsyncOps::None SEntry fail"),
         };
 
+        SHARESPACE.SetValue(CPULocal::CpuId(), 0, 120);
         if ret {
             IOURING.AUCall(self);
         }
+
+        SHARESPACE.SetValue(CPULocal::CpuId(), 0, 121);
     }
 
     pub fn Type(&self) -> usize {
@@ -203,10 +211,14 @@ impl AsyncTimeout {
     }
 
     pub fn Process(&mut self, result: i32) -> bool {
+        use super::super::SHARESPACE;
+        use super::super::qlib::vcpu_mgr::*;
+        SHARESPACE.SetValue(CPULocal::CpuId(), 0, 301);
         if result == -SysErr::ETIME {
             timer::FireTimer(self.timerId, self.seqNo);
         }
 
+        SHARESPACE.SetValue(CPULocal::CpuId(), 0, 302);
         return false
     }
 }
@@ -338,6 +350,12 @@ impl AsyncSocketRecv {
     }
 
     pub fn Process(&mut self, result: i32) -> bool {
+        use super::super::SHARESPACE;
+        use super::super::qlib::vcpu_mgr::*;
+
+        SHARESPACE.SetValue(CPULocal::CpuId(), 0, 1);
+        defer!(SHARESPACE.SetValue(CPULocal::CpuId(), 0, 9));
+
         let buf = self.ops.SocketBuf();
         if result < 0 {
             buf.SetErr(-result);
@@ -345,22 +363,29 @@ impl AsyncSocketRecv {
             return false;
         }
 
+        SHARESPACE.SetValue(CPULocal::CpuId(), 0, 2);
         // EOF
         if result == 0 {
             buf.SetClosed();
             if buf.ProduceReadBuf(0) {
+                SHARESPACE.SetValue(CPULocal::CpuId(), 0, 3);
                 self.ops.Notify(EVENT_IN);
             } else {
+                SHARESPACE.SetValue(CPULocal::CpuId(), 0, 4);
                 self.ops.Notify(EVENT_HUP);
             }
             return false
         }
 
+        SHARESPACE.SetValue(CPULocal::CpuId(), 0, 5);
         let (trigger, addr, len) = buf.ProduceAndGetFreeReadBuf(result as usize);
+        SHARESPACE.SetValue(CPULocal::CpuId(), 0, 6);
         if trigger {
+            SHARESPACE.SetValue(CPULocal::CpuId(), 0, 7);
             self.ops.Notify(EVENT_IN);
         }
 
+        SHARESPACE.SetValue(CPULocal::CpuId(), 0, 8);
         if len == 0 {
             return false;
         }
