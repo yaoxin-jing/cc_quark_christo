@@ -82,6 +82,7 @@ impl TaskIdQ {
 #[repr(align(128))]
 pub struct Scheduler {
     pub queue: [CachePadded<TaskQueue>; MAX_VCPU_COUNT],
+    pub pendingQueue: CachePadded<TaskQueue>,
     pub vcpuCnt: AtomicUsize,
     pub taskCnt: AtomicUsize,
     pub readyTaskCnt: AtomicUsize,
@@ -128,25 +129,20 @@ impl Scheduler {
 
     #[inline(always)]
     pub fn IncReadyTaskCount(&self) -> usize {
-        let cnt = self.readyTaskCnt.fetch_add(1, Ordering::AcqRel) + 1;
-        return cnt
+        let cnt = self.readyTaskCnt.fetch_add(1, Ordering::AcqRel);
+        return cnt + 1
     }
 
     #[inline(always)]
     pub fn DecReadyTaskCount(&self) -> usize {
-        let cnt = self.readyTaskCnt.fetch_sub(1, Ordering::AcqRel) - 1;
-        return cnt;
+        let cnt = self.readyTaskCnt.fetch_sub(1, Ordering::AcqRel);
+        return cnt - 1;
     }
 
     pub fn ScheduleQ(&self, task: TaskId, vcpuId: u64) {
-        self.queue[vcpuId as usize].Enqueue(task);
-        let _cnt = self.IncReadyTaskCount();
-
         //error!("ScheduleQ task {:x?}, vcpuId {}", task, vcpuId);
-        if vcpuId == 0 {
-            self.WakeOne();
-            return
-        }
+        let _cnt = self.IncReadyTaskCount();
+        self.queue[vcpuId as usize].Enqueue(task);
 
         let state = self.VcpuArr[vcpuId as usize].State();
         if state == VcpuState::Waiting {
@@ -211,14 +207,6 @@ impl Scheduler {
         }
 
         return wake;
-
-        /*let state = self.VcpuArr[vcpuId].State();
-        if state == VcpuState::Waiting {
-            self.VcpuArr[vcpuId].Wakeup();
-            return true
-        }
-
-        return false*/
     }
 }
 

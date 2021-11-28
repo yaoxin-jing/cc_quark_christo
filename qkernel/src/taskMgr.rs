@@ -139,12 +139,13 @@ pub fn WaitFn() {
                 // if there is memory needs free and freed, continue free them
                 // while super::ALLOCATOR.Free() {}
 
-                if SHARESPACE.scheduler.GlobalReadyTaskCnt() == 0 {
+                let readyCnt = SHARESPACE.scheduler.GlobalReadyTaskCnt();
+                if readyCnt == 0 {
                     debug!("vcpu {} sleep", CPULocal::CpuId());
                     GUEST_NOTIFIER.VcpuWait();
                     debug!("vcpu {} wakeup", CPULocal::CpuId());
                 } else {
-                    //error!("Waitfd None {}", SHARESPACE.scheduler.Print());
+                    debug!("Waitfd None count {} {}", readyCnt, SHARESPACE.scheduler.Print());
                 }
 
                 SHARESPACE.scheduler.DecreaseHaltVcpuCnt();
@@ -257,7 +258,7 @@ impl Scheduler {
         let vcpuId = CPULocal::CpuId() as usize;
         let vcpuCount = self.vcpuCnt.load(Ordering::Relaxed);
 
-        match self.GetNextForCpu(vcpuId, 0) {
+        match self.GetPendingTask(vcpuId) {
             None => (),
             Some(t) => {
                 return Some(t)
@@ -303,6 +304,22 @@ impl Scheduler {
         }
 
         return str;
+    }
+
+    pub fn GetPendingTask(&self, currentCpuId: usize) -> Option<TaskId> {
+        let task = self.pendingQueue.Dequeue();
+        match task {
+            None => return None,
+            Some(taskId) => {
+                let _cnt = self.DecReadyTaskCount();
+                taskId.GetTask().SetQueueId(currentCpuId);
+                if self.GlobalReadyTaskCnt() > 1 { // current CPU has more task, try to wake other vcpu to handle
+                    self.WakeOne();
+                }
+
+                return task;
+            }
+        }
     }
 
     #[inline]
@@ -357,8 +374,10 @@ impl Scheduler {
         self.ScheduleQ(task, vcpuId as u64);
     }
 
-    pub fn NewTask(&self, taskId: TaskId) -> usize {
-        self.ScheduleQ(taskId, 0);
+    pub fn NewTask(&self, task: TaskId) -> usize {
+        let _cnt = self.IncReadyTaskCount();
+        self.pendingQueue.Enqueue(task);
+        self.WakeOne();
         return 0;
     }
 }
