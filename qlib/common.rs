@@ -217,6 +217,7 @@ pub enum Error {
     NotExist,
     Signal,
     Exit,
+    AGAIN,
     SysError(i32),
     FileMapError,
     NoEnoughData,

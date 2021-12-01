@@ -95,10 +95,10 @@ fn switch_to(to: TaskId) {
     }
 }
 
-pub const IO_WAIT_CYCLES : i64 = 20_000_000; // 1ms
-pub const WAIT_CYCLES : i64 = 1_0_000; // 1ms
+pub const IO_WAIT_CYCLES : i64 = 200_000_000; // 1ms
+pub const WAIT_CYCLES : i64 = 100_000_000; // 1ms
 
-pub fn IOWait() {
+ pub fn IOWait() {
     let mut start = Rdtsc();
 
     loop {
@@ -127,13 +127,16 @@ pub fn IOWait() {
 }
 
 pub fn WaitFn() {
-    CPULocal::SetCPUState(VcpuState::Searching);
+    let mut start = Rdtsc();
     loop {
+        if PollAsyncMsg() > 10 {
+            start = Rdtsc();
+        }
+
         let next = SHARESPACE.scheduler.GetNext();
 
         match next {
             None => {
-                CPULocal::SetCPUState(VcpuState::Waiting);
                 SHARESPACE.scheduler.IncreaseHaltVcpuCnt();
 
                 // if there is memory needs free and freed, continue free them
@@ -141,22 +144,25 @@ pub fn WaitFn() {
 
                 let readyCnt = SHARESPACE.scheduler.GlobalReadyTaskCnt();
                 if readyCnt == 0 {
-                    debug!("vcpu {} sleep", CPULocal::CpuId());
-                    GUEST_NOTIFIER.VcpuWait();
-                    debug!("vcpu {} wakeup", CPULocal::CpuId());
-                } else {
-                    debug!("Waitfd None count {} {}", readyCnt, SHARESPACE.scheduler.Print());
+                    let currentTime = Rdtsc();
+                    if currentTime - start >= IO_WAIT_CYCLES {
+                        //error!("vcpu {} sleep", CPULocal::CpuId());
+                        GUEST_NOTIFIER.VcpuWait();
+                        //error!("vcpu {} wakeup", CPULocal::CpuId());
+                    }
                 }
 
                 SHARESPACE.scheduler.DecreaseHaltVcpuCnt();
-                CPULocal::SetCPUState(VcpuState::Searching);
+
+                PollAsyncMsg();
             }
 
             Some(newTask) => {
                 //error!("WaitFn newTask1 is {:x?}", &newTask);
-                CPULocal::SetCPUState(VcpuState::Running);
                 let current = TaskId::New(CPULocal::CurrentTask());
                 //error!("WaitFn newTask2 is {:x?}", &newTask);
+
+                CPULocal::Myself().SwitchToRunning();
                 switch(current, newTask);
 
                 let pendingFreeStack = CPULocal::PendingFreeStack();
@@ -167,8 +173,6 @@ pub fn WaitFn() {
                 }
 
                 //while super::ALLOCATOR.Free() {}
-
-                CPULocal::SetCPUState(VcpuState::Searching);
             }
         }
     }
@@ -208,18 +212,18 @@ pub fn ProcessOne() -> bool {
 }
 
 pub fn Wait() {
-    CPULocal::SetCPUState(VcpuState::Searching);
+    CPULocal::Myself().ToSearch(&SHARESPACE);
     let start = Rdtsc();
 
     loop {
         let next = { SHARESPACE.scheduler.GetNext() };
 
         if let Some(newTask) = next {
-            CPULocal::SetCPUState(VcpuState::Running);
+            PollAsyncMsg();
             let current = TaskId::New(CPULocal::CurrentTask());
             //let vcpuId = newTask.GetTask().queueId;
             //assert!(CPULocal::CpuId()==vcpuId, "cpu {}, target cpu {}", CPULocal::CpuId(), vcpuId);
-
+            CPULocal::Myself().SwitchToRunning();
             if current.data != newTask.data {
                 switch(current, newTask);
             }
@@ -236,15 +240,18 @@ pub fn Wait() {
             switch(current, waitTask);
             break;
         } else {
-            if !ProcessOne() {
+            if PollAsyncMsg() == 0 {
                 unsafe { llvm_asm!("pause" :::: "volatile"); }
             }
+            /*if !ProcessOne() {
+                unsafe { llvm_asm!("pause" :::: "volatile"); }
+            }*/
         }
     }
 }
 
 pub fn SwitchToNewTask() -> ! {
-    CPULocal::SetCPUState(VcpuState::Running);
+    CPULocal::Myself().ToSearch(&SHARESPACE);
 
     let current = Task::TaskId();
     let waitTask = TaskId::New(CPULocal::WaitTask());

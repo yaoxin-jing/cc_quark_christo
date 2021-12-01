@@ -352,6 +352,8 @@ impl Dirent {
     }
 
     pub fn Walk(&self, task: &Task, root: &Dirent, name: &str) -> Result<Dirent> {
+        //error!("Walk {}", name);
+        //defer!(error!("Walk 2"));
         let _a = RENAME.read();
 
         return self.walk(task, root, name)

@@ -449,13 +449,13 @@ impl KVMVcpu {
                                 super::super::print::EnableKernelPrint();
                             }
                             KERNEL_IO_THREAD.Init(sharespace.scheduler.VcpuArr[0].eventfd);
-                            URING_MGR.lock().SetupEventfd(sharespace.scheduler.VcpuArr[0].eventfd);
                             URING_MGR.lock().Addfd(sharespace.HostHostEpollfd()).unwrap();
                             vms.shareSpace = sharespace;
 
                             //self.shareSpace = vms.GetShareSpace();
                             self.StoreShareSpace(regs.rbx); // = vms.GetShareSpace();
-
+                        }
+                        qlib::HYPERCALL_RELESE_VCPU => {
                             SyncMgr::WakeShareSpaceReady();
                         }
                         qlib::HYPERCALL_EXIT_VM => {
@@ -634,13 +634,16 @@ impl KVMVcpu {
                             let addr = regs.rbx;
                             let count = regs.rcx as usize;
                             let retAddr = regs.rdi;
-                            let ret = self.VcpuWait(addr, count);
-                            if ret == -1 {
-                                return Ok(())
-                            }
+                            let cnt = match self.VcpuWait(addr, count) {
+                                Ok(cnt) => cnt,
+                                Err(Error::Exit) => {
+                                    return Ok(())
+                                }
+                                Err(e) => panic!("HYPERCALL_VCPU_WAIT get error {:?}", e)
+                            };
 
                             unsafe {
-                                *(retAddr as * mut u64) = ret as u64;
+                                *(retAddr as * mut u64) = cnt as u64;
                             }
                         }
 
@@ -693,17 +696,14 @@ impl KVMVcpu {
         Ok(())
     }
 
-    pub fn VcpuWait(&self, addr: u64, count: usize) -> i64 {
+    pub fn VcpuWait(&self, addr: u64, count: usize) -> Result<i64> {
         let sharespace = self.ShareSpace();
         while sharespace.scheduler.GlobalReadyTaskCnt() == 0 {
             if !super::runc::runtime::vm::IsRunning() {
-                return -1
+                return Err(Error::Exit)
             }
 
             {
-                sharespace.scheduler.VcpuSetRunning(self.id);
-                defer!(self.ShareSpace().scheduler.VcpuSetSearching(self.id));
-
                 sharespace.IncrHostProcessor();
                 self.GuestMsgProcess(sharespace);
 
@@ -714,20 +714,21 @@ impl KVMVcpu {
                     }
                 });
 
-                for _ in 0..10 {
+                for _ in 0..0 {
                     self.GuestMsgProcess(sharespace);
                     //short term workaround, need to change back to unblock my sql scenario.
                     if sharespace.scheduler.GlobalReadyTaskCnt() > 0 {
-                        return 0;
+                        return Ok(0);
                     }
 
-                    match sharespace.scheduler.WaitVcpu(sharespace, self.id, addr, count, false) {
+                    let ret = sharespace.scheduler.WaitVcpu(sharespace, self.id, addr, count, false);
+
+                    match ret {
                         Ok(count) => {
-                            if count > 0 {
-                                return count
-                            }
+                            return Ok(count)
                         },
-                        Err(Error::Exit) => return -1,
+                        Err(Error::AGAIN) => (),
+                        Err(Error::Exit) => return Err(Error::Exit),
                         Err(e) => panic!("HYPERCALL_HLT wait fail with error {:?}", e),
                     }
 
@@ -736,23 +737,21 @@ impl KVMVcpu {
                 }
             }
 
-            sharespace.scheduler.VcpuSetWaiting(self.id);
-            defer!(self.ShareSpace().scheduler.VcpuSetSearching(self.id));
-
             if sharespace.scheduler.GlobalReadyTaskCnt() != 0 {
-                return 0;
+                return Ok(0);
             }
             let ret = sharespace.scheduler.WaitVcpu(sharespace, self.id, addr, count, true);
             match ret {
                 Ok(count) => {
-                    return count
+                    return Ok(count)
                 },
-                Err(Error::Exit) => return -1,
+                Err(Error::AGAIN) => (),
+                Err(Error::Exit) => return Err(Error::Exit),
                 Err(e) => panic!("HYPERCALL_HLT wait fail with error {:?}", e),
             }
         }
 
-        return 0;
+        return Ok(0);
     }
 
     pub fn GuestMsgProcess(&self, sharespace: &'static ShareSpace) {
@@ -855,16 +854,46 @@ impl CPULocal {
 
         let mut uring = URING_MGR.lock();
 
+        let uringEventfd = uring.Eventfd();
         uring.Addfd(eventfd).expect("fail to add vcpu eventfd");
 
         self.eventfd = eventfd;
         self.epollfd = epfd;
         self.vcpuId = vcpuId;
+        self.uringEventfd = uringEventfd;
         self.data = 1;
+
+        let mut ev = epoll_event {
+            events: EVENT_READ as u32 | EPOLLET as u32,
+            u64: uringEventfd as u64
+        };
+
+        let ret = unsafe {
+            epoll_ctl(epfd, EPOLL_CTL_ADD, uringEventfd, &mut ev as *mut epoll_event)
+        };
+
+        if ret == -1 {
+            panic!("CPULocal::Init {} add host uringEventfd fail, error is {}", self.vcpuId, errno::errno().0);
+        }
+    }
+
+
+    pub fn CleanIOUringEventfd(&self) {
+        let mut data : u64 = 0;
+        let ret = unsafe {
+            libc::read(self.uringEventfd, &mut data as * mut _ as *mut libc::c_void, 8)
+        };
+
+        if ret < 0 {
+            if errno::errno().0 != SysErr::EAGAIN {
+                panic!("KIOThread::Wakeup fail... uringEventfd is {}, errno is {}",
+                       self.uringEventfd, errno::errno().0);
+            }
+        }
     }
 
     pub fn VcpuWait(&self, sharespace: &ShareSpace, addr: u64, count: usize, block: bool) -> Result<i64> {
-        let mut events = [epoll_event { events: 0, u64: 0 }; 2];
+        let mut events = [epoll_event { events: 0, u64: 0 }; 3];
 
         let time = if block {
             -1
@@ -873,38 +902,61 @@ impl CPULocal {
         };
 
         loop {
+            let seachCount = self.ToWaiting(sharespace);
+            if  seachCount == 0 {
+                self.CleanIOUringEventfd();
+                if URING_MGR.lock().CompleteLen() > 0 {
+                    if self.ToSearch(sharespace) == 1 {
+                        return Ok(0)
+                    }
+
+                    continue;
+                }
+            }
+
             let nfds = unsafe {
-                epoll_wait(self.epollfd, &mut events[0], 2, time)
+                epoll_wait(self.epollfd, &mut events[0], 3, time)
             };
 
             if !super::runc::runtime::vm::IsRunning() {
+                self.ToSearch(sharespace);
                 return Err(Error::Exit)
             }
 
             if nfds == -1 {
+                self.ToSearch(sharespace);
                 let err = errno::errno().0;
                 return Err(Error::SysError(err))
             }
 
             let mut wakeVcpu = false;
             let mut hasMsg = false;
+            let mut hasUringMsg = false;
 
             if nfds == 0 {
-                return Ok(0)
+                self.ToSearch(sharespace);
+                continue
             }
 
-            if nfds == 2 {
+            if nfds == 3 {
                 wakeVcpu = true;
                 hasMsg = true;
+                hasUringMsg = true;
             } else {
-                assert!(nfds == 1);
-                let fd = events[0].u64 as i32;
-                if fd == self.eventfd { // ask for the vcpu wake up
-                    wakeVcpu = true;
-                } else {
-                    hasMsg = true;
+                for i in 0..nfds as usize {
+                    let fd = events[i].u64 as i32;
+
+                    if fd == self.eventfd { // ask for the vcpu wake up
+                        wakeVcpu = true;
+                    } else if fd == self.uringEventfd {
+                        hasUringMsg = true;
+                    } else {
+                        hasMsg = true;
+                    }
                 }
             }
+
+            //error!("cpu[{}] wakeup {}, hasMsg {}, hasUringMsg {}", self.vcpuId, wakeVcpu, hasMsg, hasUringMsg);
 
             let count = if hasMsg {
                 match sharespace.TryLockEpollProcess() {
@@ -917,23 +969,39 @@ impl CPULocal {
                 0
             };
 
-            if wakeVcpu || count > 0 {
-                if wakeVcpu {
-                    let mut data : u64 = 0;
-                    let ret = unsafe {
-                        libc::read(self.eventfd, &mut data as * mut _ as *mut libc::c_void, 8)
-                    };
-
-                    if ret < 0 {
-                        panic!("KIOThread::Wakeup fail... eventfd is {}, errno is {}",
-                               self.eventfd, errno::errno().0);
-                    }
-                }
-
+            if count > 0 {
+                self.ToSearch(sharespace);
                 return Ok(count)
             }
-        }
 
+            if wakeVcpu {
+                let mut data : u64 = 0;
+                let ret = unsafe {
+                    libc::read(self.eventfd, &mut data as * mut _ as *mut libc::c_void, 8)
+                };
+
+                if ret < 0 {
+                    panic!("KIOThread::Wakeup fail... eventfd is {}, errno is {}",
+                           self.eventfd, errno::errno().0);
+                }
+
+                self.ToSearch(sharespace);
+                return Ok(0)
+            }
+
+            let cnt = self.ToSearch(sharespace);
+            //error!("cpu[{}] hasMsg {}, cnt is {}", self.vcpuId, hasMsg, cnt);
+            if hasUringMsg {
+                if URING_MGR.lock().CompleteLen() > 0 {
+                    // for uring processing, one vcpu is enough
+                    if cnt > 1 {
+                        return Ok(0)
+                    } else {
+                        continue
+                    }
+                }
+            }
+        }
     }
 
     pub fn Wakeup(&self) {

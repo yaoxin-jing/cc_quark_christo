@@ -108,7 +108,7 @@ use ::qlib::mutex::*;
 
 //use linked_list_allocator::LockedHeap;
 //use buddy_system_allocator::LockedHeap;
-use taskMgr::{CreateTask, WaitFn, IOWait};
+use taskMgr::{CreateTask, WaitFn};
 use self::qlib::{ShareSpace, SysCallID};
 use self::qlib::buddyallocator::*;
 use self::qlib::pagetable::*;
@@ -240,6 +240,8 @@ pub extern fn syscall_handler(arg0: u64, arg1: u64, arg2: u64, arg3: u64, arg4: 
     let mut pid = 0;
     let startTime = Rdtsc();
 
+    self::taskMgr::PollAsyncMsg();
+
     let llevel = SHARESPACE.config.read().LogLevel;
     if llevel == LogLevel::Complex {
         tid = currTask.Thread().lock().id;
@@ -301,6 +303,7 @@ pub extern fn syscall_handler(arg0: u64, arg1: u64, arg2: u64, arg3: u64, arg4: 
         currTask.SwitchPageTable();
     }
 
+    self::taskMgr::PollAsyncMsg();
     if !(pt.rip == pt.rcx && pt.r11 == pt.eflags) {
         //error!("iret *****, pt is {:x?}", pt);
         IRet(kernalRsp)
@@ -419,10 +422,13 @@ pub extern fn rust_main(heapStart: u64, heapLen: u64, id: u64, vdsoParamAddr: u6
         SetVCPCount(vcpuCnt as usize);
         InitTimeKeeper(vdsoParamAddr);
         VDSO.Initialization(vdsoParamAddr);
+        HyperCall64(qlib::HYPERCALL_RELESE_VCPU, (&(*SHARESPACE) as *const ShareSpace) as u64, 0, 0);
     } else {
         InitGs(id);
         //PerfGoto(PerfType::Kernel);
     }
+
+    SHARESPACE.IncrVcpuSearching();
 
     taskMgr::AddNewCpu();
     RegisterSysCall(syscall_entry as u64);
@@ -435,7 +441,7 @@ pub extern fn rust_main(heapStart: u64, heapLen: u64, id: u64, vdsoParamAddr: u6
 
     if id == 0 {
         //ALLOCATOR.Print();
-        IOWait();
+        //IOWait();
     };
 
     if id == 1 {

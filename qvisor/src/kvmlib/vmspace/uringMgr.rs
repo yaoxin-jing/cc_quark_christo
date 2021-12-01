@@ -34,6 +34,16 @@ pub const FDS_SIZE : usize = 8192;
 
 impl UringMgr {
     pub fn New(size: usize) -> Self {
+        let eventfd = unsafe {
+            libc::eventfd(0, 0)
+        };
+
+        if eventfd < 0 {
+            panic!("UringMgr eventfd fail {}", errno::errno().0);
+        }
+
+        VMSpace::UnblockFd(eventfd);
+
         let mut fds = Vec::with_capacity(FDS_SIZE);
         for _i in 0..FDS_SIZE {
             fds.push(-1);
@@ -41,13 +51,26 @@ impl UringMgr {
 
         let ret = Self {
             uringfds: Vec::new(),
-            eventfd: 0,
+            eventfd: eventfd,
             fds: fds,
             rings: Vec::new(),
             uringSize: size
         };
 
         return ret;
+    }
+
+    pub fn CompleteLen(&self) -> usize {
+        let mut cnt = 0;
+        for u in &self.rings {
+            cnt += u.CompleteLen();
+        }
+
+        return cnt;
+    }
+
+    pub fn Eventfd(&self) -> i32 {
+        return self.eventfd;
     }
 
     pub fn Init(&mut self, DedicateUringCnt: usize) {
@@ -73,18 +96,13 @@ impl UringMgr {
             }
         }
 
+        self.Register(IORING_REGISTER_EVENTFD, &self.eventfd as * const _ as u64, 1).expect("InitUring register eventfd fail");
         self.Register(IORING_REGISTER_FILES, &self.fds[0] as * const _ as u64, self.fds.len() as u32).expect("InitUring register files fail");
     }
 
     pub fn Setup(&mut self, idx: usize, submission: u64, completion: u64) -> Result<i32> {
         self.rings[idx].CopyTo(submission, completion);
         return Ok(0)
-    }
-
-    pub fn SetupEventfd(&mut self, eventfd: i32) {
-        self.eventfd = eventfd;
-
-        self.Register(IORING_REGISTER_EVENTFD, &self.eventfd as * const _ as u64, 1).expect("InitUring register eventfd fail");
     }
 
     pub fn Enter(&mut self, idx: usize, toSumbit: u32, minComplete:u32, flags: u32) -> Result<i32> {

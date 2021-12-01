@@ -327,7 +327,12 @@ impl KVMVcpu {
                 ret = super::VMSpace::WaitFD(msg.fd, msg.mask) as u64;
             },
             Msg::VcpuWait(msg) => {
-                ret = self.VcpuWait(msg.addr, msg.count) as u64;
+                let cnt = match self.VcpuWait(msg.addr, msg.count) {
+                    Ok(cnt) => cnt,
+                    Err(e) => panic!("qcall::VcpuWait get error {:?}", e)
+                };
+
+                ret = cnt as u64;
             },
         };
 

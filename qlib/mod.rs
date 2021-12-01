@@ -104,6 +104,7 @@ pub const HYPERCALL_VCPU_YIELD: u16 = 20;
 pub const HYPERCALL_VCPU_DEBUG: u16 = 21;
 pub const HYPERCALL_VCPU_PRINT: u16 = 22;
 pub const HYPERCALL_VCPU_WAIT: u16 = 23;
+pub const HYPERCALL_RELESE_VCPU: u16 = 24;
 
 pub const DUMMY_TASKID: TaskId = TaskId::New(0xffff_ffff);
 
@@ -527,6 +528,7 @@ pub struct ShareSpace {
     pub scheduler: task_mgr::Scheduler,
     pub guestMsgCount: CachePadded<AtomicU64>,
     pub hostProcessor: CachePadded<AtomicU64>,
+    pub VcpuSearchingCnt: CachePadded<AtomicU64>,
 
     pub kernelIOThreadWaiting: CachePadded<AtomicBool>,
     pub config: QRwLock<Config>,
@@ -549,6 +551,7 @@ impl ShareSpace {
             scheduler: task_mgr::Scheduler::default(),
             guestMsgCount: CachePadded::new(AtomicU64::new(0)),
             hostProcessor: CachePadded::new(AtomicU64::new(0)),
+            VcpuSearchingCnt: CachePadded::new(AtomicU64::new(0)),
             kernelIOThreadWaiting: CachePadded::new(AtomicBool::new(false)),
             config: QRwLock::new(Config::default()),
             logBuf: QMutex::new(None),
@@ -596,6 +599,16 @@ impl ShareSpace {
     #[inline]
     pub fn IncrHostProcessor(&self) {
         self.hostProcessor.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub fn IncrVcpuSearching(&self) -> u64 {
+        let ret = self.VcpuSearchingCnt.fetch_add(1, Ordering::SeqCst);
+        return ret + 1;
+    }
+
+    pub fn DecrVcpuSearching(&self) -> u64 {
+        let ret = self.VcpuSearchingCnt.fetch_sub(1, Ordering::SeqCst);
+        return ret - 1;
     }
 
     #[inline]

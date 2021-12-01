@@ -15,11 +15,13 @@
 use core::sync::atomic::Ordering;
 use core::sync::atomic::AtomicU64;
 
+use super::ShareSpace;
+
 #[derive(Clone, Debug, PartialEq, Copy)]
 #[repr(u64)]
 pub enum VcpuState {
+    Searching,
     Waiting,
-    Searching, // wait in kernel to look for new jobs
     Running,
 }
 
@@ -40,36 +42,36 @@ pub struct CPULocal {
     pub data: u64, // for eventfd data writing and reading
     pub eventfd: i32,
     pub epollfd: i32,
+    pub uringEventfd: i32,
 }
 
 impl CPULocal {
-    pub fn SwapState(&self, state: VcpuState) -> VcpuState {
-        let old = self.state.swap(state as u64, Ordering::SeqCst);
-        return unsafe { core::mem::transmute(old) };
-    }
-
-    pub fn SetState(&self, state: VcpuState) {
-        self.state.store(state as u64, Ordering::Release);
-    }
-
     pub fn State(&self) -> VcpuState {
         let state = self.state.load(Ordering::Acquire);
         return unsafe { core::mem::transmute(state) };
     }
 
-    pub fn SetWaiting(&self) {
-        self.SetState(VcpuState::Waiting)
-    }
-
-    pub fn SetRunning(&self) {
-        self.SetState(VcpuState::Running)
-    }
-
-    pub fn SetSearching(&self) {
-        self.SetState(VcpuState::Searching)
-    }
-
     pub fn IncrUringMsgCnt(&self, cnt: u64) -> u64 {
         return self.uringMsgCount.fetch_add(cnt, Ordering::Relaxed);
+    }
+
+    pub fn ToSearch(&self, sharespace: &ShareSpace) -> u64 {
+        assert!(self.state.load(Ordering::SeqCst)!=VcpuState::Searching as u64, "state is {}", self.state.load(Ordering::SeqCst));
+        self.state.store(VcpuState::Searching as u64, Ordering::SeqCst);
+        return sharespace.IncrVcpuSearching();
+    }
+
+    pub fn ToWaiting(&self, sharespace: &ShareSpace) -> u64 {
+        assert!(self.state.load(Ordering::SeqCst)==VcpuState::Searching as u64, "state is {}", self.state.load(Ordering::SeqCst));
+        self.state.store(VcpuState::Waiting as u64, Ordering::SeqCst);
+        let searchingCnt = sharespace.DecrVcpuSearching();
+        return searchingCnt;
+    }
+
+    pub fn ToRunning(&self, sharespace: &ShareSpace) -> u64 {
+        assert!(self.state.load(Ordering::SeqCst)==VcpuState::Searching as u64, "state is {}", self.state.load(Ordering::SeqCst));
+        self.state.store(VcpuState::Running as u64, Ordering::SeqCst);
+        let searchingCnt = sharespace.DecrVcpuSearching();
+        return searchingCnt;
     }
 }

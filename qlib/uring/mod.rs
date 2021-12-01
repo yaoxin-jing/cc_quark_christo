@@ -106,6 +106,10 @@ impl IoUring {
         Submitter::new(&self.fd, self.params.0.flags, &self.sq)
     }
 
+    pub fn CompleteLen(&self) -> usize {
+        self.completion().len()
+    }
+
     #[inline]
     pub fn params(&self) -> &Parameters {
         &self.params
