@@ -94,14 +94,6 @@ impl TaskId {
 
 
 
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum TaskState {
-    Running,
-    Ready,
-    Waiting,
-    Done,
-    Saving,
-}
 
 fn guard() {}
 

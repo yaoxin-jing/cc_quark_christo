@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use core::sync::atomic::{Ordering, AtomicU32};
-use alloc::string::String;
+//use alloc::string::String;
 
 use super::task::*;
 use super::SHARESPACE;
@@ -222,14 +222,36 @@ pub fn ProcessOne() -> bool {
 }
 
 pub fn Wait() {
+    PollAsyncMsg();
+    let current = TaskId::New(CPULocal::CurrentTask());
+    let vcpu = CPULocal::CpuId();
+
+    {
+        let mut tasklist = SHARESPACE.scheduler.taskLists[vcpu].lock();
+        if !current.Context().SetWaiting() { // the IO operation has finished
+            debug!("Wait quick path remove...1");
+            tasklist.Remove(current);
+            return
+        }
+    }
+
     CPULocal::Myself().ToSearch(&SHARESPACE);
     let start = Rdtsc();
 
     loop {
+        {
+            let mut tasklist = SHARESPACE.scheduler.taskLists[vcpu].lock();
+            if current.Context().TaskState() == TaskState::Ready { // the IO operation has finished
+                debug!("Wait quick path remove...2");
+                tasklist.Remove(current);
+                CPULocal::Myself().SwitchToRunning();
+                return
+            }
+        }
+
         let next = { SHARESPACE.scheduler.GetNext() };
 
         if let Some(newTask) = next {
-            let current = TaskId::New(CPULocal::CurrentTask());
             //let vcpuId = newTask.GetTask().queueId;
             //assert!(CPULocal::CpuId()==vcpuId, "cpu {}, target cpu {}", CPULocal::CpuId(), vcpuId);
 
@@ -302,22 +324,10 @@ impl Scheduler {
         let mut total = 0;
         let vcpuCount = self.vcpuCnt;
         for i in 0..vcpuCount {
-            total += self.queue[i].Len();
+            total += self.taskLists[i].Len();
         }
 
         return total;
-    }
-
-    pub fn Print(&self) -> String {
-        let mut str = alloc::string::String::new();
-        let vcpuCount = self.vcpuCnt;
-        for i in 0..vcpuCount {
-            if self.queue[i].Len() > 0 {
-                str += &format!("{}:{}", i, self.queue[i].ToString());
-            }
-        }
-
-        return str;
     }
 
     #[inline]
@@ -327,43 +337,28 @@ impl Scheduler {
             return None;
         }
 
-        let count = self.queue[vcpuId].lock().len();
-        for _ in 0..count {
-            let task = {
-                let mut queue = self.queue[vcpuId].lock();
-                let task = queue.pop_front();
-                if task.is_none() {
-                    return None;
-                }
-
-                let _cnt = self.DecReadyTaskCount();
-                task
-            };
-
-            let taskId = task.unwrap();
-
-            assert!(vcpuId==taskId.GetTask().QueueId(),
-            "vcpuId is {:x}, taskId.GetTask().QueueId() is {:x}, task {:x?}/{:x?}", vcpuId, taskId.GetTask().QueueId(), taskId, taskId.GetTask().guard);
-            if taskId.GetTask().context.Ready() != 0 || taskId.data == Task::Current().taskId {
-                //the task is in the queue, but the context has not been setup
-                if currentCpuId != vcpuId { //stealing
-                    //error!("cpu currentCpuId {} stealing task {:x?} from cpu {}", currentCpuId, taskId, vcpuId);
-
+        let mut tasklist = self.taskLists[vcpuId].lock();
+        let task = tasklist.Deq();
+        match task {
+            Some(taskId) => {
+                assert!(vcpuId==taskId.GetTask().QueueId(),
+                    "vcpuId is {:x}, taskId.GetTask().QueueId() is {:x}, task {:x?}/{:x?}",
+                    vcpuId, taskId.GetTask().QueueId(), taskId, taskId.GetTask().guard);
+                self.DecReadyTaskCount();
+                if currentCpuId != vcpuId {
                     taskId.GetTask().SetQueueId(currentCpuId);
                 } else {
-                    if count > 1 { // current CPU has more task, try to wake other vcpu to handle
+                    if tasklist.count > 0 {
                         self.WakeOne();
                     }
                 }
 
-                //error!("GetNextForCpu task is {:x?}", taskId);
-                return task
+                return Some(taskId)
             }
-
-            self.ScheduleQ(taskId, vcpuId as u64);
+            None => {
+                return None
+            }
         }
-
-        return None;
     }
 
     pub fn Schedule(&self, taskId: TaskId) {

@@ -43,9 +43,9 @@ impl TaskId {
     }
 
     #[inline]
-    pub fn Context(&self) -> &'static Context {
+    pub fn Context(&self) -> &'static mut Context {
         unsafe {
-            return &*(self.data as * const Context)
+            return &mut *(self.data as * mut Context)
         }
     }
 
@@ -55,14 +55,131 @@ impl TaskId {
     }
 }
 
-
 #[derive(Debug, Default)]
-pub struct Links {
-    pub prev: AtomicU64,
-    pub next: AtomicU64,
+pub struct TaskListIntern {
+    pub head: u64,
+    pub tail: u64,
+    pub count: usize,
 }
 
-#[derive(Debug)]
+impl TaskListIntern {
+    pub fn Enq(&mut self, taskId: TaskId) {
+        let currContext = taskId.Context();
+        if self.count == 0 {
+            self.head = taskId.data;
+            self.tail = taskId.data;
+        } else {
+            currContext.prev = self.tail;
+            let mut tailContext = TaskId::New(self.tail).Context();
+            tailContext.next = taskId.data;
+            self.tail = taskId.data;
+        }
+
+        assert!(currContext.TaskState() == TaskState::Waiting ||
+            currContext.TaskState() == TaskState::Running, // the task is still running
+            "current state is {:?}", currContext.state);
+        currContext.SetTaskState(TaskState::Ready);
+
+        self.count += 1;
+    }
+
+    pub fn Remove(&mut self, taskId: TaskId) {
+        let context = taskId.Context();
+        assert!(context.TaskState() == TaskState::Ready, "current state is {:?}", context.state);
+
+        let prev = context.prev;
+        let next = context.next;
+
+        if prev == 0 {
+            self.head = next;
+        } else {
+            let prevContext = TaskId::New(prev).Context();
+            prevContext.next = next;
+        }
+
+        if next == 0 {
+            self.tail = prev;
+        } else {
+            let nextContext = TaskId::New(next).Context();
+            nextContext.prev = prev;
+        }
+
+        self.count -= 1;
+
+        context.prev = 0;
+        context.next = 0;
+        context.SetTaskState(TaskState::Running);
+    }
+
+    pub fn Deq(&mut self) -> Option<TaskId> {
+        let mut curr = self.head;
+
+        while curr != 0 {
+            let taskId = TaskId::New(curr);
+            let currentContext = taskId.Context();
+            if currentContext.ready.load(Ordering::SeqCst) == 1 {
+                self.Remove(taskId);
+                return Some(taskId)
+            }
+
+            curr = currentContext.next;
+        }
+
+        return None
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct TaskList(pub QMutex<TaskListIntern>);
+
+impl Deref for TaskList {
+    type Target = QMutex<TaskListIntern>;
+
+    fn deref(&self) -> &QMutex<TaskListIntern> {
+        &self.0
+    }
+}
+
+impl TaskList {
+    pub fn Dequeue(&self) -> Option<TaskId> {
+        return self.lock().Deq();
+    }
+
+    pub fn Enqueue(&self, task: TaskId) {
+        self.lock().Enq(task);
+    }
+
+    pub fn Len(&self) -> u64 {
+        return self.lock().count as u64;
+    }
+
+    //return whether the remove task succeed, i.e. after lock, whether the task is in ready state
+    pub fn Remove(&self, taskId: TaskId) -> bool {
+        let context = taskId.Context();
+        let mut t = self.lock();
+        if context.TaskState() != TaskState::Ready {
+            return false
+        }
+
+        t.Remove(taskId);
+        return true;
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum TaskState {
+    Running,
+    Ready,
+    Waiting,
+}
+
+impl Default for TaskState {
+    fn default() -> Self {
+        return Self::Ready
+    }
+}
+
+#[derive(Debug, Default)]
 #[repr(C)]
 pub struct Context {
     pub rsp: u64,
@@ -80,7 +197,9 @@ pub struct Context {
     //pub sigFPState: Vec<Box<X86fpstate>>,
     // job queue id
     pub queueId: AtomicUsize,
-    pub links: Links
+    pub prev: u64,
+    pub next: u64,
+    pub state: QMutex<TaskState>
 }
 
 impl Context {
@@ -101,7 +220,9 @@ impl Context {
             //X86fpstate: Default::default(),
             //sigFPState: Default::default(),
             queueId: AtomicUsize::new(0),
-            links: Links::default(),
+            prev: 0,
+            next: 0,
+            state: QMutex::new(TaskState::Waiting)
 
         }
     }
@@ -113,13 +234,41 @@ impl Context {
     pub fn SetReady(&self, val: u64) {
         return self.ready.store(val, Ordering::SeqCst)
     }
+
+    pub fn TaskId(&self) -> TaskId {
+        return TaskId {
+            data: self as * const _ as u64
+        }
+    }
+
+    pub fn TaskState(&self) -> TaskState {
+        return *self.state.lock()
+    }
+
+    pub fn SetTaskState(&self, taskState: TaskState) {
+        *self.state.lock() = taskState;
+    }
+
+    // set the task state to waiting
+    // return:  true if the current state is Running, i.e. normal state
+    //          false if the current state is Ready, i.e. the io operation has finished
+    pub fn SetWaiting(&self) -> bool {
+        let mut state = self.state.lock();
+        if *state == TaskState::Running {
+            *state = TaskState::Waiting;
+            return true;
+        }
+
+        assert!(*state == TaskState::Ready);
+        return false;
+    }
 }
 
 #[derive(Default)]
 #[repr(C)]
 #[repr(align(128))]
 pub struct Scheduler {
-    pub queue: Vec<CachePadded<TaskQueue>>,
+    pub taskLists: Vec<CachePadded<TaskList>>,
     pub vcpuCnt: usize,
     pub taskCnt: AtomicUsize,
     pub readyTaskCnt: AtomicUsize,
@@ -132,15 +281,15 @@ pub struct Scheduler {
 impl Scheduler {
     pub fn New(vcpuCount: usize) -> Self {
         let mut vcpuArr : Vec<CPULocal> = Vec::with_capacity(vcpuCount);
-        let mut queue: Vec<CachePadded<TaskQueue>> = Vec::with_capacity(vcpuCount);
+        let mut tasklists : Vec<CachePadded<TaskList>> = Vec::with_capacity(vcpuCount);
         for _i in 0..vcpuCount {
             vcpuArr.push(CPULocal::default());
-            queue.push(CachePadded::new(TaskQueue::default()));
+            tasklists.push(CachePadded::new(TaskList::default()));
         }
 
         return Self {
             VcpuArr: vcpuArr,
-            queue: queue,
+            taskLists: tasklists,
             vcpuCnt: vcpuCount,
             ..Default::default()
         }
@@ -164,12 +313,7 @@ impl Scheduler {
     }
 
     pub fn ReadyTaskCnt(&self, vcpuId: usize) -> u64 {
-        //return self.readyTaskCnt.load(Ordering::SeqCst) as u64
-        return self.queue[vcpuId].Len();
-    }
-
-    pub fn PrintQ(&self, vcpuId: u64) -> String {
-        return format!("{:x?}", self.queue[vcpuId as usize].lock());
+        return self.taskLists[vcpuId].Len();
     }
 
     #[inline(always)]
@@ -185,13 +329,13 @@ impl Scheduler {
     }
 
     pub fn ScheduleQ(&self, task: TaskId, vcpuId: u64) {
+        //error!("ScheduleQ task {:x?} vcpu {}", task, vcpuId);
         let _cnt = {
-            let mut queue = self.queue[vcpuId as usize].lock();
-            queue.push_back(task);
+            let mut list = self.taskLists[vcpuId as usize].lock();
+            list.Enq(task);
             self.IncReadyTaskCount()
         };
 
-        //error!("ScheduleQ task {:x?}, vcpuId {}", task, vcpuId);
         if vcpuId == 0 {
             self.WakeOne();
             return
@@ -204,17 +348,6 @@ impl Scheduler {
         } else if state == VcpuState::Running {
             self.WakeOne();
         }
-    }
-
-    pub fn AllTasks(&self) -> Vec<TaskId> {
-        let mut ret = Vec::new();
-        for i in 0..8 {
-            for t in self.queue[i].lock().iter() {
-                ret.push(*t)
-            }
-        }
-
-        return ret;
     }
 
     pub fn WakeOne(&self) -> i64 {
@@ -248,16 +381,9 @@ impl Scheduler {
         }
 
         return wake;
-
-        /*let state = self.VcpuArr[vcpuId].State();
-        if state == VcpuState::Waiting {
-            self.VcpuArr[vcpuId].Wakeup();
-            return true
-        }
-
-        return false*/
     }
 }
+
 
 pub struct TaskQueue(pub QMutex<VecDeque<TaskId>>);
 

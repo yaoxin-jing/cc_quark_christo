@@ -290,9 +290,5 @@ impl VirtualMachine {
     pub fn Schedule(shareSpace: &ShareSpace, taskId: TaskId) {
         shareSpace.scheduler.ScheduleQ(taskId, taskId.Queue());
     }
-
-    pub fn PrintQ(shareSpace: &ShareSpace, vcpuId: u64) -> String {
-        return shareSpace.scheduler.PrintQ(vcpuId)
-    }
 }
 
