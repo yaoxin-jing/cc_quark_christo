@@ -27,6 +27,10 @@ pub fn UpdateFD(fd: i32) -> Result<()> {
     return GlobalIOMgr().UpdateFD(fd);
 }
 
+pub fn UpdateFDWithExtraMask(fd: i32, mask: EventMask) -> Result<()> {
+    return GlobalIOMgr().UpdateFDWithExtraMask(fd, mask);
+}
+
 pub fn NonBlockingPoll(fd: i32, mask: EventMask) -> EventMask {
     return HostSpace::NonBlockingPoll(fd, mask) as EventMask;
 }
@@ -69,7 +73,11 @@ impl IOMgr {
     }
 
     pub fn UpdateFD(&self, fd: i32) -> Result<()> {
-        return self.UpdateFDAsync(fd);
+        return self.UpdateFDAsync(fd, 0);
+    }
+
+    pub fn UpdateFDWithExtraMask(&self, fd: i32, mask: EventMask) -> Result<()> {
+        return self.UpdateFDAsync(fd, mask);
     }
 
     pub fn FdWaitInfo(&self, fd: i32) -> Option<FdWaitInfo> {
@@ -81,7 +89,7 @@ impl IOMgr {
         return Some(fdInfo.lock().waitInfo.clone());
     }
 
-    pub fn UpdateFDAsync(&self, fd: i32) -> Result<()> {
+    pub fn UpdateFDAsync(&self, fd: i32, extraMask: EventMask) -> Result<()> {
         let fi = match self.FdWaitInfo(fd) {
             None => return Ok(()),
             Some(fi) => fi,
@@ -89,7 +97,7 @@ impl IOMgr {
 
         let epollfd = self.Epollfd();
 
-        return fi.UpdateFDAsync(fd, epollfd);
+        return fi.UpdateFDAsync(fd, epollfd, extraMask);
     }
 
     pub fn SetWaitInfo(&self, fd: i32, queue: Queue) {
@@ -107,11 +115,23 @@ impl IOMgr {
     }
 
     pub fn Notify(&self, fd: i32, mask: EventMask) {
-        let fi = match self.FdWaitInfo(fd) {
+        /*let fi = match self.FdWaitInfo(fd) {
             None => return,
             Some(fi) => fi,
+        };*/
+
+        let fdInfo = match self.GetByHost(fd) {
+            Some(info) => info,
+            None => {
+                panic!("UpdateWaitInfo panic...")
+            }
         };
 
-        fi.Notify(mask);
+        let fi = fdInfo.lock().waitInfo.clone();
+
+        let sockinfo = fdInfo.lock().sockInfo.lock().clone();
+        sockinfo.Notify(mask, fi);
+
+        //fi.Notify(mask);
     }
 }

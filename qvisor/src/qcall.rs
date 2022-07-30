@@ -40,6 +40,10 @@ pub fn AQHostCall(msg: HostOutputMsg, _shareSpace: &ShareSpace) {
             //super::VMSpace::PostRDMAConnect(msgRef);
             panic!("PostRDMAConnect qcall not implemented")
         }
+        HostOutputMsg::AsyncSocketWrite(msg) => {
+            let fd = msg.fd;
+            super::VMSpace::AsyncSocketWrite(fd);
+        }
     }
 }
 

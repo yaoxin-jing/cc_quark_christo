@@ -21,15 +21,18 @@ use core::sync::atomic::Ordering;
 use spin::Mutex;
 
 use crate::qlib::common::*;
+use crate::qlib::linux_def::*;
 use crate::qlib::kernel::kernel::waiter::*;
 use crate::qlib::kernel::IOURING;
 use crate::qlib::rdmasocket::*;
+use crate::qlib::kernel::socket::hostinet::asyncsocket::*;
 use crate::qlib::*;
 
 #[derive(Clone)]
 pub enum SockInfo {
     File,                             // it is not socket
     Socket(SocketInfo),                           // normal socket
+    AsyncSocket(AsyncSocketOperations),
     RDMAServerSocket(RDMAServerSock), //
     RDMADataSocket(RDMADataSock),     //
     RDMAContext,
@@ -46,6 +49,7 @@ impl fmt::Debug for SockInfo {
         match self {
             Self::File => write!(f, "SockInfo::File"),
             Self::Socket(_) => write!(f, "SockInfo::Socket"),
+            Self::AsyncSocket(_) => write!(f, "SockInfo::AsyncSocket"),
             Self::RDMAServerSocket(_) => write!(f, "SockInfo::RDMAServerSocket"),
             Self::RDMADataSocket(_) => write!(f, "SockInfo::RDMADataSocket"),
             Self::RDMAContext => write!(f, "SockInfo::RDMAContext"),
@@ -54,13 +58,16 @@ impl fmt::Debug for SockInfo {
 }
 
 impl SockInfo {
-    pub fn Notify(&self, eventmask: EventMask, waitinfo: FdWaitInfo) {
+    pub fn Notify(&self, eventmask: EventMask, waitinfo: FdWaitInfo)  {
         match self {
             Self::File => {
                 waitinfo.Notify(eventmask);
             }
             Self::Socket(_) => {
                 waitinfo.Notify(eventmask);
+            }
+            Self::AsyncSocket(ref asyncSocket) => {
+                asyncSocket.Notify(eventmask);
             }
             Self::RDMAServerSocket(ref sock) => sock.Notify(eventmask, waitinfo),
             Self::RDMADataSocket(ref sock) => sock.Notify(eventmask, waitinfo),
@@ -187,12 +194,12 @@ impl FdWaitInfo {
         return Self(Arc::new(QMutex::new(intern)));
     }
 
-    pub fn UpdateFDAsync(&self, fd: i32, epollfd: i32) -> Result<()> {
+    pub fn UpdateFDAsync(&self, fd: i32, epollfd: i32, extraMask: EventMask) -> Result<()> {
         let op;
         let mask = {
             let mut fi = self.lock();
 
-            let mask = fi.queue.Events();
+            let mask = fi.queue.Events() | extraMask;
 
             if fi.mask == 0 {
                 if mask != 0 {

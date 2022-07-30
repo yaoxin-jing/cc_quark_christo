@@ -24,11 +24,12 @@ use core::sync::atomic::AtomicI64;
 use core::sync::atomic::Ordering;
 
 //use super::super::*;
+use crate::qlib::mem::block::Iovs;
 use super::super::super::super::common::*;
+use super::super::super::super::fileinfo::*;
 use super::super::super::super::linux::time::Timeval;
 use super::super::super::super::linux_def::*;
 use super::super::super::super::socket_buf::*;
-use super::super::super::fd::*;
 use super::super::super::fs::attr::*;
 use super::super::super::fs::dentry::*;
 use super::super::super::fs::dirent::*;
@@ -41,6 +42,7 @@ use super::super::super::kernel::fd_table::*;
 use super::super::super::kernel::kernel::GetKernel;
 use super::super::super::kernel::time::*;
 use super::super::super::kernel::waiter::*;
+use super::super::super::GlobalIOMgr;
 use super::super::super::task::*;
 use super::super::super::tcpip::tcpip::*;
 use super::super::super::Kernel;
@@ -54,6 +56,7 @@ use super::socket::*;
 #[derive(Clone)]
 pub enum SockState {
     TCPInit,                      // Init TCP Socket, no listen and no connect
+    TCPConnecting,                 // TCP socket is connecting
     TCPServer(AcceptQueue),        // Uring TCP Server socket, when socket start to listen
     TCPData(Arc<SocketBuff>),
 }
@@ -62,6 +65,7 @@ impl fmt::Debug for SockState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             SockState::TCPInit => write!(f, "SocketBufType::TCPInit"),
+            SockState::TCPConnecting => write!(f, "SocketBufType::Connecting"),
             SockState::TCPServer(_) => write!(f, "SocketBufType::TCPServer"),
             SockState::TCPData(_) => write!(f, "SocketBufType::TCPData"),
         }
@@ -182,28 +186,13 @@ impl AsyncSocketOperations {
         };
 
         let ret = Self(Arc::new(ret));
+
+        let fdInfo = GlobalIOMgr().GetByHost(fd).expect("AsyncSocketOperations new fail");
+        *fdInfo.lock().sockInfo.lock() = SockInfo::AsyncSocket(ret.clone());
+        ret.Updatefd();
         return Ok(ret);
     }
 
-    pub fn IOAccept(&self) -> Result<AcceptItem> {
-        let mut ai = AcceptItem::default();
-        ai.len = ai.addr.data.len() as _;
-        let res = Kernel::HostSpace::IOAccept(
-            self.fd,
-            &ai.addr as *const _ as u64,
-            &ai.len as *const _ as u64,
-        ) as i32;
-        if res < 0 {
-            return Err(Error::SysError(-res as i32));
-        }
-
-        ai.fd = res;
-        return Ok(ai);
-    }
-
-    pub fn Notify(&self, mask: EventMask) {
-        self.queue.Notify(EventMaskFromLinux(mask as u32));
-    }
 }
 
 impl Deref for AsyncSocketOperations {
@@ -228,6 +217,91 @@ impl AsyncSocketOperations {
             Some(ref v) => Some(v.ToVec().unwrap()),
         };
     }
+
+    pub fn SocketBufState(&self) -> SockState {
+        return self.state.lock().clone();
+    }
+
+    pub fn SocketBuf(&self) -> Arc<SocketBuff> {
+        match self.SocketBufState() {
+            SockState::TCPData(b) => return b,
+            _ => panic!(
+                "SocketBufType::None has no SockBuff {:?}",
+                self.SocketBufState()
+            ),
+        }
+    }
+
+    pub fn ExtraMask(&self) -> EventMask {
+        match self.SocketBufState() {
+            SockState::TCPInit => return 0,
+            SockState::TCPConnecting => return EVENT_OUT | EVENT_ERR | EVENT_HUP,
+            SockState::TCPServer(_) => return EVENT_IN | EVENT_ERR | EVENT_HUP,
+            SockState::TCPData(_) => return EVENT_IN | EVENT_ERR | EVENT_HUP,
+        }
+    }
+
+    pub fn Updatefd(&self) {
+        let fd = self.fd;
+        UpdateFDWithExtraMask(fd, self.ExtraMask()).unwrap();
+    }
+
+    pub fn AcceptData(&self, acceptQueue: &AcceptQueue) -> Result<AcceptItem> {
+        let (trigger, acceptItem) = acceptQueue.lock().DeqSocket();
+        if trigger {
+            self.Updatefd();
+        }
+
+        return acceptItem
+    }
+
+    fn prepareControlMessage(&self, controlDataLen: usize) -> (i32, Vec<u8>) {
+        // shortcut for no controldata wanted
+        if controlDataLen == 0 {
+            return (0, Vec::new());
+        }
+
+        let mut controlData: Vec<u8> = vec![0; controlDataLen];
+        if self.passInq.load(Ordering::Relaxed) {
+            let inqMessage = ControlMessageTCPInq {
+                Size: self.SocketBuf().readBuf.lock().AvailableDataSize() as u32,
+            };
+
+            let (remaining, updated_flags) = inqMessage.EncodeInto(&mut controlData[..], 0);
+            let remainSize = remaining.len();
+            controlData.resize(controlDataLen - remainSize, 0);
+            return (updated_flags, controlData);
+        } else {
+            return (0, Vec::new());
+        }
+    }
+
+
+    pub fn ReadData(&self, task: &Task, dsts: &mut [IoVec], peek: bool) -> Result<i64> {
+        let (trigger, cnt) = self.SocketBuf().Readv(task, dsts, peek)?;
+
+        if trigger {
+            self.Updatefd();
+        }
+
+        return Ok(cnt as i64);
+    }
+
+    pub fn WriteData(&self, task: &Task, srcs: &[IoVec]) -> Result<i64> {
+        let size = IoVec::NumBytes(srcs);
+        if size == 0 {
+            return Ok(0)
+        }
+
+        let (count, writeBuf) = self.SocketBuf().Writev(task, srcs)?;
+
+        if let Some(_) = writeBuf {
+            HostSpace::AsyncSocketWrite(self.fd)
+        }
+
+        return Ok(count as i64);
+
+    }
 }
 
 pub const SIZEOF_SOCKADDR: usize = SocketSize::SIZEOF_SOCKADDR_INET6;
@@ -240,22 +314,47 @@ impl Waitable for AsyncSocketOperations {
     }
 
     fn Readiness(&self, _task: &Task, mask: EventMask) -> EventMask {
-        let fd = self.fd;
-        return NonBlockingPoll(fd, mask);
+        let state = self.SocketBufState();
+        match state {
+            SockState::TCPInit => return 0,
+            SockState::TCPConnecting => return 0,
+            SockState::TCPServer(queue) => {
+                return queue.lock().Events() & mask;
+            }
+            SockState::TCPData(queue) =>{
+                return queue.Events() & mask;
+            }
+        }
     }
 
     fn EventRegister(&self, task: &Task, e: &WaitEntry, mask: EventMask) {
         let queue = self.queue.clone();
         queue.EventRegister(task, e, mask);
-        let fd = self.fd;
-        UpdateFD(fd).unwrap();
+        match self.SocketBufState() {
+            SockState::TCPInit => return,
+            SockState::TCPConnecting => return,
+            SockState::TCPServer(_) => {
+                self.Updatefd();
+            }
+            SockState::TCPData(_) =>{
+                self.Updatefd();
+            }
+        }
     }
 
     fn EventUnregister(&self, task: &Task, e: &WaitEntry) {
         let queue = self.queue.clone();
         queue.EventUnregister(task, e);
-        let fd = self.fd;
-        UpdateFD(fd).unwrap();
+        match self.SocketBufState() {
+            SockState::TCPInit => return,
+            SockState::TCPConnecting => return,
+            SockState::TCPServer(_) => {
+                self.Updatefd();
+            }
+            SockState::TCPData(_) =>{
+                self.Updatefd();
+            }
+        }
     }
 }
 
@@ -303,34 +402,18 @@ impl FileOperations for AsyncSocketOperations {
         _offset: i64,
         _blocking: bool,
     ) -> Result<i64> {
-        let size = IoVec::NumBytes(dsts);
-        let buf = DataBuff::New(size);
-        let iovs = buf.Iovs(size);
-        let ret = IORead(self.fd, &iovs)?;
-
-        // handle partial memcopy
-        task.CopyDataOutToIovs(&buf.buf[0..ret as usize], dsts, false)?;
-        return Ok(ret);
+        return self.ReadData(task, dsts, false);
     }
 
     fn WriteAt(
         &self,
         task: &Task,
-        _f: &File,
+        _f: &File,  
         srcs: &[IoVec],
         _offset: i64,
         _blocking: bool,
     ) -> Result<i64> {
-        let size = IoVec::NumBytes(srcs);
-        if size == 0 {
-            return Ok(0)
-        }
-
-        let size = IoVec::NumBytes(srcs);
-        let mut buf = DataBuff::New(size);
-        let len = task.CopyDataInFromIovs(&mut buf.buf, srcs, true)?;
-        let iovs = buf.Iovs(len);
-        return IOWrite(self.fd, &iovs);
+        return self.WriteData(task, srcs)
     }
 
     fn Append(&self, task: &Task, f: &File, srcs: &[IoVec]) -> Result<(i64, i64)> {
@@ -496,9 +579,16 @@ impl SockOperations for AsyncSocketOperations {
         flags: i32,
         blocking: bool,
     ) -> Result<i64> {
+        let acceptQueue = match self.SocketBufState() {
+            SockState::TCPServer(ref queue) => queue.clone(),
+            _ => {
+                return Err(Error::SysError(SysErr::EINVAL));
+            }
+        };
+
         let mut acceptItem = AcceptItem::default();
         if !blocking {
-            let ai = self.IOAccept();
+            let ai = self.AcceptData(&acceptQueue);
 
             match ai {
                 Err(Error::SysError(SysErr::EAGAIN)) => {
@@ -517,7 +607,7 @@ impl SockOperations for AsyncSocketOperations {
             defer!(self.EventUnregister(task, &general));
 
             loop {
-                let ai = self.IOAccept();
+                let ai = self.AcceptData(&acceptQueue);
 
                 match ai {
                     Err(Error::SysError(SysErr::EAGAIN)) => (),
@@ -611,6 +701,18 @@ impl SockOperations for AsyncSocketOperations {
             return Err(Error::SysError(-res as i32));
         }
 
+        let acceptQueue = match self.SocketBufState() {
+            SockState::TCPServer(q) => {
+                q.lock().SetQueueLen(len as usize);
+                return Ok(0);
+            }
+            _ => AcceptQueue::default(), // panic?
+        };
+
+        acceptQueue.lock().SetQueueLen(len as usize);
+        *self.state.lock() = SockState::TCPServer(acceptQueue);
+
+        self.Updatefd();
         return Ok(res);
     }
 
@@ -823,7 +925,7 @@ impl SockOperations for AsyncSocketOperations {
         flags: i32,
         deadline: Option<Time>,
         senderRequested: bool,
-        controlDataLen: usize,
+        _controlDataLen: usize,
     ) -> Result<(i64, i32, Option<(SockAddr, usize)>, Vec<u8>)> {
 
         //todo: we don't support MSG_ERRQUEUE
@@ -838,112 +940,120 @@ impl SockOperations for AsyncSocketOperations {
                 return Err(Error::SysError(SysErr::EINVAL));
             }
 
-        let size = IoVec::NumBytes(dsts);
-        let buf = DataBuff::New(size);
-        let iovs = buf.Iovs(size);
+        let waitall = (flags & MsgType::MSG_WAITALL) != 0;
+        let dontwait = (flags & MsgType::MSG_DONTWAIT) != 0;
+        let trunc = (flags & MsgType::MSG_TRUNC) != 0;
+        let peek = (flags & MsgType::MSG_PEEK) != 0;
 
-        let mut msgHdr = MsgHdr::default();
-        msgHdr.iov = &iovs[0] as *const _ as u64;
-        msgHdr.iovLen = iovs.len();
+        let controlDataLen = 0;
 
-        let mut addr: [u8; SIZEOF_SOCKADDR] = [0; SIZEOF_SOCKADDR];
-        if senderRequested {
-            msgHdr.msgName = &mut addr[0] as *mut _ as u64;
-            msgHdr.nameLen = SIZEOF_SOCKADDR as u32;
+        if self.SocketBuf().RClosed() {
+            let senderAddr = if senderRequested {
+                let addr = self.remoteAddr.lock().as_ref().unwrap().clone();
+                let l = addr.Len();
+                Some((addr, l))
+            } else {
+                None
+            };
+
+            let (retFlags, controlData) = self.prepareControlMessage(controlDataLen);
+            return Ok((0 as i64, retFlags, senderAddr, controlData));
         }
 
-        let mut controlVec: Vec<u8> = vec![0; controlDataLen];
-        msgHdr.msgControlLen = controlDataLen;
-        if msgHdr.msgControlLen != 0 {
-            msgHdr.msgControl = &mut controlVec[0] as *mut _ as u64;
+        let len = IoVec::NumBytes(dsts);
+        let data = if trunc {
+            Some(Iovs(dsts).Data())
         } else {
-            msgHdr.msgControl = ptr::null::<u8>() as u64;
-        }
+            None
+        };
+
+        let mut iovs = dsts;
+
+        let mut count = 0;
+        let mut tmp;
 
         let general = task.blocker.generalEntry.clone();
         self.EventRegister(task, &general, EVENT_READ);
         defer!(self.EventUnregister(task, &general));
 
-        let mut res = if msgHdr.msgControlLen != 0 {
-            Kernel::HostSpace::IORecvMsg(
-                self.fd,
-                &mut msgHdr as *mut _ as u64,
-                flags | MsgType::MSG_DONTWAIT,
-                false,
-            ) as i32
-        } else {
-            Kernel::HostSpace::IORecvfrom(
-                self.fd,
-                buf.Ptr(),
-                size,
-                flags  | MsgType::MSG_DONTWAIT,
-                msgHdr.msgName,
-                &msgHdr.nameLen as * const _ as u64,
+        'main: loop {
+            loop {
+                match self.ReadData(task, iovs, peek) {
+                    Err(Error::SysError(SysErr::EWOULDBLOCK)) => {
+                        if count > 0 {
+                            if dontwait || !waitall {
+                                break 'main;
+                            }
+                        }
 
-            ) as i32
-        };
+                        if count == len as i64 {
+                            break 'main;
+                        }
 
-        while res == -SysErr::EWOULDBLOCK && flags & MsgType::MSG_DONTWAIT == 0 {
+                        if count == 0 && dontwait {
+                            return Err(Error::SysError(SysErr::EWOULDBLOCK));
+                        }
+
+                        break;
+                    }
+                    Err(e) => {
+                        if count > 0 {
+                            break 'main;
+                        }
+                        return Err(e);
+                    }
+                    Ok(n) => {
+                        if n == 0 {
+                            break 'main;
+                        }
+
+                        count += n;
+                        if count == len as i64 || peek {
+                            break 'main;
+                        }
+
+                        tmp = Iovs(iovs).DropFirst(n as usize);
+                        iovs = &mut tmp;
+                    }
+                };
+            }
 
             match task.blocker.BlockWithMonoTimer(true, deadline) {
-                Err(Error::ErrInterrupted) => {
-                    return Err(Error::SysError(SysErr::ERESTARTSYS));
-                }
-                Err(Error::SysError(SysErr::ETIMEDOUT)) => {
-                    return Err(Error::SysError(SysErr::EAGAIN));
-                }
                 Err(e) => {
-                    return Err(e);
+                    if count > 0 {
+                        break 'main;
+                    }
+                    match e {
+                        Error::SysError(SysErr::ETIMEDOUT) => {
+                            return Err(Error::SysError(SysErr::EAGAIN));
+                        }
+                        Error::ErrInterrupted => {
+                            return Err(Error::SysError(SysErr::ERESTARTSYS));
+                        }
+                        _ => {
+                            return Err(e);
+                        }
+                    }
                 }
                 _ => (),
             }
-
-            res = if msgHdr.msgControlLen != 0 {
-                Kernel::HostSpace::IORecvMsg(
-                    self.fd,
-                    &mut msgHdr as *mut _ as u64,
-                    flags | MsgType::MSG_DONTWAIT,
-                    false,
-                ) as i32
-            } else {
-                Kernel::HostSpace::IORecvfrom(
-                    self.fd,
-                    buf.Ptr(),
-                    size,
-                    flags  | MsgType::MSG_DONTWAIT,
-                    msgHdr.msgName,
-                    &msgHdr.nameLen as * const _ as u64,
-
-                ) as i32
-            };
         }
 
-        if res < 0 {
-            return Err(Error::SysError(-res as i32));
-        }
-
-        let msgFlags = msgHdr.msgFlags & !MsgType::MSG_CTRUNC;
-        let senderAddr = if senderRequested
-            // for tcp connect, recvmsg get nameLen=0 msg
-            && msgHdr.nameLen >= 4
-            {
-                let addr = GetAddr(addr[0] as i16, &addr[0..msgHdr.nameLen as usize])?;
-                let l = addr.Len();
-                Some((addr, l))
-            } else {
+        let senderAddr = if senderRequested {
+            let addr = self.remoteAddr.lock().as_ref().unwrap().clone();
+            let l = addr.Len();
+            Some((addr, l))
+        } else {
             None
         };
 
-        controlVec.resize(msgHdr.msgControlLen, 0);
+        if trunc {
+            task.mm.ZeroDataOutToIovs(task, &data.unwrap(), count as usize, false)?;
+        }
 
-        // todo: need to handle partial copy
-        let count = if res < buf.buf.len() as i32 {
-            res
-        } else {
-            buf.buf.len() as i32
-        };
-        let _len = task.CopyDataOutToIovs(&buf.buf[0..count as usize], dsts, false)?;
-        return Ok((res as i64, msgFlags, senderAddr, controlVec));
+        let (retFlags, controlData) = self.prepareControlMessage(controlDataLen);
+        return Ok((count as i64, retFlags, senderAddr, controlData));
+
     }
 
     fn SendMsg(
@@ -954,83 +1064,77 @@ impl SockOperations for AsyncSocketOperations {
         msgHdr: &mut MsgHdr,
         deadline: Option<Time>,
     ) -> Result<i64> {
-        if flags
-            & !(MsgType::MSG_DONTWAIT
-            | MsgType::MSG_EOR
-            | MsgType::MSG_FASTOPEN
-            | MsgType::MSG_MORE
-            | MsgType::MSG_NOSIGNAL)
-            != 0
-            {
-                return Err(Error::SysError(SysErr::EINVAL));
+        if self.SocketBuf().WClosed() {
+            return Err(Error::SysError(SysErr::EPIPE))
+        }
+
+        if msgHdr.msgName != 0 || msgHdr.msgControl != 0 {
+            panic!("Hostnet Socketbuf doesn't supprot MsgHdr");
+        }
+
+        let len = Iovs(srcs).Count();
+        let mut count = 0;
+        let mut srcs = srcs;
+        let mut tmp;
+        let general = task.blocker.generalEntry.clone();
+        self.EventRegister(task, &general, EVENT_WRITE);
+        defer!(self.EventUnregister(task, &general));
+
+        loop {
+            loop {
+                match self.WriteData(task, srcs) {
+                    Err(Error::SysError(SysErr::EWOULDBLOCK)) => {
+                        if flags & MsgType::MSG_DONTWAIT != 0 {
+                            if count > 0 {
+                                return Ok(count);
+                            }
+                            return Err(Error::SysError(SysErr::EWOULDBLOCK));
+                        }
+
+                        if count > 0 {
+                            return Ok(count);
+                        }
+
+                        if flags & MsgType::MSG_DONTWAIT != 0 {
+                            return Err(Error::SysError(SysErr::EWOULDBLOCK));
+                        }
+
+                        break;
+                    }
+                    Err(e) => {
+                        if count > 0 {
+                            return Ok(count);
+                        }
+
+                        return Err(e);
+                    }
+                    Ok(n) => {
+                        count += n;
+                        if count == len as i64 {
+                            return Ok(count);
+                        }
+                        tmp = Iovs(srcs).DropFirst(n as usize);
+                        srcs = &mut tmp;
+                    }
+                }
             }
 
-        let size = IoVec::NumBytes(srcs);
-        let mut buf = DataBuff::New(size);
-        let len = task.CopyDataInFromIovs(&mut buf.buf, srcs, true)?;
-        let iovs = buf.Iovs(len);
-
-        msgHdr.iov = &iovs[0] as *const _ as u64;
-        msgHdr.iovLen = iovs.len();
-        msgHdr.msgFlags = 0;
-
-        let mut res = if msgHdr.msgControlLen > 0 {
-            Kernel::HostSpace::IOSendMsg(
-                self.fd,
-                msgHdr as *const _ as u64,
-                flags | MsgType::MSG_DONTWAIT,
-                false,
-            ) as i32
-        } else {
-            Kernel::HostSpace::IOSendto(
-                self.fd,
-                buf.Ptr(),
-                len,
-                flags | MsgType::MSG_DONTWAIT,
-                msgHdr.msgName,
-                msgHdr.nameLen,
-            ) as i32
-        };
-
-        while res == -SysErr::EWOULDBLOCK && flags & MsgType::MSG_DONTWAIT == 0 {
-            let general = task.blocker.generalEntry.clone();
-
-            self.EventRegister(task, &general, EVENT_WRITE);
-            defer!(self.EventUnregister(task, &general));
             match task.blocker.BlockWithMonoTimer(true, deadline) {
                 Err(Error::SysError(SysErr::ETIMEDOUT)) => {
-                    return Err(Error::SysError(SysErr::EAGAIN))
+                    if count > 0 {
+                        return Ok(count);
+                    }
+                    return Err(Error::SysError(SysErr::EWOULDBLOCK));
                 }
                 Err(e) => {
+                    if count > 0 {
+                        return Ok(count);
+                    }
                     return Err(e);
                 }
                 _ => (),
             }
-
-            res = if msgHdr.msgControlLen > 0 {
-                Kernel::HostSpace::IOSendMsg(
-                    self.fd,
-                    msgHdr as *const _ as u64,
-                    flags | MsgType::MSG_DONTWAIT,
-                    false,
-                ) as i32
-            } else {
-                Kernel::HostSpace::IOSendto(
-                    self.fd,
-                    buf.Ptr(),
-                    len,
-                    flags | MsgType::MSG_DONTWAIT,
-                    msgHdr.msgName,
-                    msgHdr.nameLen,
-                ) as i32
-            };
         }
-
-        if res < 0 {
-            return Err(Error::SysError(-res as i32));
-        }
-
-        return Ok(res as i64);
     }
 
     fn SetRecvTimeout(&self, ns: i64) {

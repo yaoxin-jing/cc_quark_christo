@@ -83,7 +83,7 @@ int main(int argc, char const *argv[])
     printf("sa_len: %d\n", sa_len);
     printf("sock is %d\n", sock);
     printf("after calling socket()******************************\n");
-    if (getsockname(sock, &sa, &sa_len) == -1) {
+    /*if (getsockname(sock, &sa, &sa_len) == -1) {
           perror("getsockname() failed");
           return -1;
     }
@@ -98,7 +98,7 @@ int main(int argc, char const *argv[])
     else {
         printf("Remote IP address is: %s\n", inet_ntoa(sa.sin_addr));
         printf("Remote port is: %d\n", (int) ntohs(sa.sin_port));
-    }
+    }*/
 
 
     printf("start to connect \n");

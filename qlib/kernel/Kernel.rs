@@ -858,6 +858,12 @@ impl HostSpace {
         super::SHARESPACE.AQCall(&msg);
     }
 
+    pub fn AsyncSocketWrite(fd: i32) {
+        let msg = HostOutputMsg::AsyncSocketWrite(AsyncSocketWrite { fd });
+
+        super::SHARESPACE.AQCall(&msg);
+    }
+
     pub fn SyncPrint(level: DebugLevel, str: &str) {
         let msg = Print { level, str };
 

@@ -41,6 +41,7 @@ use x86_64::structures::paging::PageTableFlags;
 use crate::qlib::fileinfo::*;
 use crate::vmspace::kernel::GlobalIOMgr;
 use crate::vmspace::kernel::GlobalRDMASvcCli;
+use crate::vmspace::kernel::kernel::waiter::EventMaskFromLinux;
 
 use self::limits::*;
 use self::random::*;
@@ -53,6 +54,7 @@ use super::qlib::common::{Error, Result};
 use super::qlib::control_msg::*;
 use super::qlib::kernel::util::cstring::*;
 use super::qlib::kernel::SignalProcess;
+use super::qlib::kernel::socket::hostinet::asyncsocket::*;
 use super::qlib::linux::membarrier::*;
 use super::qlib::linux_def::*;
 use super::qlib::pagetable::PageTables;
@@ -790,6 +792,74 @@ impl VMSpace {
         };
 
         return fdInfo.IOFSync(true);
+    }
+
+    pub fn AsyncSocketWrite(fd: i32) {
+        let fdInfo = match Self::GetFdInfo(fd) {
+            Some(fdInfo) => fdInfo,
+            None => panic!("AsyncSocketWrite can't find fd {}", fd),
+        };
+
+        let state = fdInfo.lock().sockInfo.lock().clone();
+        match state {
+            SockInfo::AsyncSocket(asyncSocket) => {
+                let state = asyncSocket.SocketBufState();
+                let queue = asyncSocket.queue.clone();
+                let buf = match state {
+                    SockState::TCPData(buf) => buf.clone(),
+                    _ => {
+                        panic!("AsyncSocketWrite get unexpected 2")
+                    }
+                };
+                let (mut addr, mut len) = buf.GetAvailableWriteBuf();
+
+                while addr > 0 {
+                    let ret = unsafe {
+                        libc::write(fd, addr as _, len as _)
+                    };
+
+                    let result = if ret < 0 {
+                        Self::GetRet(ret as i64) as i32
+                    } else {
+                        ret as i32
+                    };
+
+                    if result < 0 {
+                        buf.SetErr(-result);
+                        queue.Notify(EventMaskFromLinux((EVENT_ERR | READABLE_EVENT) as u32));
+                        return;
+                        //return true;
+                    }
+
+                    // EOF
+                    // to debug
+                    if result == 0 {
+                        buf.SetWClosed();
+                        if buf.ProduceReadBuf(0) {
+                            queue.Notify(EventMaskFromLinux(WRITEABLE_EVENT as u32));
+                        } else {
+                            queue.Notify(EventMaskFromLinux(WRITEABLE_EVENT as u32));
+                        }
+                        return;
+                    }
+
+                    error!("AsyncSocketWrite 1 fd {}", fd);
+                    let (trigger, taddr, tlen) = buf.ConsumeAndGetAvailableWriteBuf(result as usize);
+                    error!("AsyncSocketWrite 2 fd {}", fd);
+                    if trigger {
+                        queue.Notify(EventMaskFromLinux(WRITEABLE_EVENT as u32));
+                    }
+
+                    addr = taddr;
+                    len = tlen;
+                }
+
+                if buf.PendingWriteShutdown() {
+                    queue.Notify(EVENT_PENDING_SHUTDOWN);
+                }
+            }
+            _ => panic!("AsyncSocketWrite get unexpected"),
+        }
     }
 
     pub fn Seek(fd: i32, offset: i64, whence: i32) -> i64 {

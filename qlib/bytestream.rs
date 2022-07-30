@@ -229,6 +229,10 @@ impl RingBuf {
     }
 
     pub fn AvailableSpace(&self) -> usize {
+        /*assert!(self.Len() >= self.AvailableDataSize(),
+                "AvailableSpace len {}, {}, {:?}",
+                self.Len(), self.AvailableDataSize(), &self.headtail);*/
+
         return self.Len() - self.AvailableDataSize();
     }
 
@@ -345,7 +349,7 @@ impl RingBuf {
     }
 
     //consume count data
-    pub fn Consume(&self, count: usize) -> bool { //2
+    pub fn Consume(&self, count: usize) -> bool {
         let head = self.headtail[0].load(Ordering::Relaxed);
         self.headtail[0].store(head.wrapping_add(count as u32), Ordering::Release);
 

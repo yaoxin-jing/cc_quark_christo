@@ -27,6 +27,7 @@ use super::qlib::kernel::SHARESPACE;
 use super::qlib::kernel::TSC;
 use super::qlib::kernel::vcpu::*;
 use super::qlib::kernel::quring::uring_async::UringAsyncMgr;
+use super::qlib::kernel::socket::hostinet::asyncsocket::*;
 
 use super::qlib::common::*;
 use super::qlib::kernel::memmgr::pma::*;
@@ -410,5 +411,11 @@ unsafe impl GlobalAlloc for GlobalVcpuAllocator {
 impl UringAsyncMgr {
     pub fn FreeSlot(&self, id: usize) {
         self.freeSlot(id);
+    }
+}
+
+impl AsyncSocketOperations {
+    pub fn Notify(&self, _mask: EventMask) {
+        panic!("AsyncSocketOperations get notify in kernel");
     }
 }

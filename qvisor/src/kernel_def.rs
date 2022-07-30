@@ -4,6 +4,7 @@ use core::sync::atomic::Ordering;
 use libc::*;
 use std::fmt;
 
+use super::qlib::kernel::kernel::waiter::EventMaskFromLinux;
 use super::qlib::kernel::quring::uring_async::UringAsyncMgr;
 use super::qlib::common::*;
 use super::qlib::control_msg::*;
@@ -12,6 +13,7 @@ use super::qlib::kernel::task::*;
 use super::qlib::kernel::Kernel::*;
 use super::qlib::kernel::Tsc;
 use super::qlib::kernel::TSC;
+use super::qlib::kernel::socket::hostinet::asyncsocket::*;
 use super::qlib::linux::time::*;
 use super::qlib::linux_def::*;
 use super::qlib::loader::*;
@@ -21,13 +23,14 @@ use super::qlib::qmsg::*;
 use super::qlib::rdma_svc_cli::*;
 use super::qlib::task_mgr::*;
 use super::qlib::vcpu_mgr::*;
+use super::qlib::socket_buf::*;
 use super::qlib::*;
-use super::vmspace::*;
 use super::ThreadId;
 use super::FD_NOTIFIER;
 use super::QUARK_CONFIG;
 use super::URING_MGR;
 use super::VMS;
+use super::vmspace::VMSpace;
 use crate::SHARE_SPACE;
 
 impl std::error::Error for Error {}
@@ -312,5 +315,219 @@ pub fn HugepageDontNeed(addr: u64) {
 impl UringAsyncMgr {
     pub fn FreeSlot(&self, id: usize) {
         self.freeids.lock().push_back(id as _);
+    }
+}
+
+impl AsyncSocketOperations {
+    pub fn GetRet(ret: i64) -> i64 {
+        if ret == -1 {
+            //info!("get error, errno is {}", errno::errno().0);
+            return -errno::errno().0 as i64;
+        }
+
+        return ret;
+    }
+
+    pub fn IOAccept(&self) -> Result<AcceptItem> {
+        let mut ai = AcceptItem::default();
+        ai.len = ai.addr.data.len() as _;
+        let res = VMSpace::IOAccept(
+            self.fd,
+            &ai.addr as *const _ as u64,
+            &ai.len as *const _ as u64,
+        ) as i32;
+        if res < 0 {
+            return Err(Error::SysError(-res as i32));
+        }
+
+        ai.fd = res;
+        return Ok(ai);
+    }
+
+
+    pub fn Notify(&self, mask: EventMask) {
+        let state = self.SocketBufState();
+        let queue = self.queue.clone();
+        match state {
+            SockState::TCPInit => {
+                //panic!("AsyncSocketOperations::Notify expect state TCPInit {:x}", mask);
+            }
+            SockState::TCPConnecting => {
+                /*assert!(mask & (EVENT_OUT | EVENT_ERR | EVENT_HUP) != 0, "AsyncSocketOperations::Notify expect state TCPConnecting {:x}", mask);
+                // connecting moving to connected
+                let mut val: i32 = 0;
+                let len: i32 = 4;
+                let res = HostSpace::GetSockOpt(
+                    self.fd,
+                    LibcConst::SOL_SOCKET as i32,
+                    LibcConst::SO_ERROR as i32,
+                    &mut val as *mut i32 as u64,
+                    &len as *const i32 as u64,
+                ) as i32;
+
+                if res < 0 {
+                    return Err(Error::SysError(-res));
+                }
+
+                if val != 0 {
+                    if val == SysErr::ECONNREFUSED {
+                        return Err(Error::SysError(SysErr::EINPROGRESS));
+                    }
+                    return Err(Error::SysError(val as i32));
+                }
+
+                self.SetRemoteAddr(socketaddr.to_vec())?;
+                let socketBuf = Arc::new(SocketBuff::Init(MemoryDef::DEFAULT_BUF_PAGE_COUNT));
+                *self.state.lock() = SockState::TCPData(socketBuf);*/
+                error!("SockState::TCPConnecting is not async");
+                queue.Notify(EventMaskFromLinux(mask as u32));
+            }
+            SockState::TCPServer(acceptQueue) => {
+                assert!(mask & (EVENT_IN | EVENT_ERR | EVENT_HUP)!= 0, "AsyncSocketOperations::Notify expect state TCPServer {:x}", mask);
+                loop {
+                    let ai = match self.IOAccept() {
+                        Err(Error::SysError(SysErr::EAGAIN)) => {
+                            break;
+                        }
+                        Err(Error::SysError(syserr)) => {
+                            acceptQueue.lock().SetErr(syserr);
+                            queue.Notify(EventMaskFromLinux((EVENT_ERR | READABLE_EVENT) as u32));
+                            break;
+                        }
+                        Ok(ai) => ai,
+                        _ => {
+                            panic!("impossible!");
+                        }
+                    };
+
+                    let (trigger, hasSpace) = acceptQueue.lock().Enq(ai);
+                    if trigger {
+                        self.queue.Notify(EventMaskFromLinux(READABLE_EVENT as u32));
+                    }
+
+                    if !hasSpace {
+                        break;
+                    }
+                }
+            }
+
+            SockState::TCPData(buf) => {
+                assert!(mask & (EVENT_IN | EVENT_OUT | EVENT_ERR | EVENT_HUP)!= 0, "AsyncSocketOperations::Notify expect state TCPData {:x}", mask);
+
+                let fd = self.fd;
+                if mask & EVENT_OUT != 0 {
+                    let (mut addr, mut len) = buf.GetAvailableWriteBuf();
+                    while addr > 0 {
+                        let ret = unsafe {
+                            libc::write(fd, addr as _, len as _)
+                        };
+
+                        let result = if ret < 0 {
+                            Self::GetRet(ret as i64) as i32
+                        } else {
+                            ret as i32
+                        };
+
+                        if result < 0 {
+                            if result == -SysErr::EAGAIN {
+                                break;
+                            }
+                            buf.SetErr(-result);
+                            queue.Notify(EventMaskFromLinux((EVENT_ERR | READABLE_EVENT) as u32));
+                            return;
+                            //return true;
+                        }
+
+                        // EOF
+                        // to debug
+                        if result == 0 {
+                            buf.SetWClosed();
+                            if buf.ProduceReadBuf(0) {
+                                queue.Notify(EventMaskFromLinux(WRITEABLE_EVENT as u32));
+                            } else {
+                                queue.Notify(EventMaskFromLinux(WRITEABLE_EVENT as u32));
+                            }
+                            return;
+                        }
+
+                        let (trigger, taddr, tlen) = buf.ConsumeAndGetAvailableWriteBuf(result as usize);
+                        if trigger {
+                            queue.Notify(EventMaskFromLinux(WRITEABLE_EVENT as u32));
+                        }
+
+                        addr = taddr;
+                        len = tlen;
+                    }
+
+                    if buf.PendingWriteShutdown() {
+                        queue.Notify(EVENT_PENDING_SHUTDOWN);
+                    }
+                }
+
+                if mask & EVENT_IN != 0 {
+                    let (mut addr, mut len) = buf.GetFreeReadBuf();
+                    while addr > 0 {
+                        let ret = unsafe {
+                            libc::read(fd, addr as _, len as _) as i32
+                        };
+
+                        let result = if ret < 0 {
+                            Self::GetRet(ret as i64) as i32
+                        } else {
+                            ret as i32
+                        };
+
+                        if result < 0 {
+                            if result == -SysErr::EAGAIN {
+                                break;
+                            }
+                            buf.SetErr(-result);
+                            queue
+                                .Notify(EventMaskFromLinux((EVENT_ERR | READABLE_EVENT) as u32));
+                            return;
+                        }
+
+                        if result == 0 {
+                            buf.SetRClosed();
+                            if buf.HasReadData() {
+                                queue.Notify(EventMaskFromLinux(READABLE_EVENT as u32));
+                            } else {
+                                queue.Notify(EventMaskFromLinux(EVENT_HUP as u32));
+                            }
+                            return;
+                        }
+
+                        let (trigger, taddr, tlen) = buf.ProduceAndGetFreeReadBuf(result as usize);
+                        if trigger {
+                            queue.Notify(EventMaskFromLinux(READABLE_EVENT as u32));
+                        }
+
+                        addr = taddr;
+                        len = tlen;
+                    }
+                }
+
+                if mask & (EVENT_ERR | EVENT_HUP) != 0 {
+                    let result = unsafe {
+                        libc::read(fd, 0 as _, 0 as _) as i32
+                    };
+
+                    if result < 0 {
+                        buf.SetErr(-result);
+                        queue
+                            .Notify(EventMaskFromLinux((EVENT_ERR | READABLE_EVENT) as u32));
+                    }
+
+                    if result == 0 {
+                        buf.SetRClosed();
+                        if buf.HasReadData() {
+                            queue.Notify(EventMaskFromLinux(READABLE_EVENT as u32));
+                        } else {
+                            queue.Notify(EventMaskFromLinux(EVENT_HUP as u32));
+                        }
+                    }
+                }
+            }
+        }
     }
 }

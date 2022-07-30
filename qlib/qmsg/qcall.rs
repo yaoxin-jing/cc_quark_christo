@@ -831,6 +831,7 @@ pub enum HostOutputMsg {
     QCall(u64),
     EventfdWriteAsync(EventfdWriteAsync),
     PostRDMAConnect(u64),
+    AsyncSocketWrite(AsyncSocketWrite),
 }
 
 impl Default for HostOutputMsg {
@@ -841,5 +842,10 @@ impl Default for HostOutputMsg {
 
 #[derive(Clone, Default, Debug, Copy)]
 pub struct EventfdWriteAsync {
+    pub fd: i32,
+}
+
+#[derive(Clone, Default, Debug, Copy)]
+pub struct AsyncSocketWrite {
     pub fd: i32,
 }

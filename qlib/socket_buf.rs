@@ -283,6 +283,13 @@ impl AcceptQueueIntern {
         return self.queue.len() < self.queueLen;
     }
 
+    pub fn Enq(&mut self, ai: AcceptItem) -> (bool, bool) {
+        self.queue.push_back(ai);
+        self.total += 1;
+        let trigger = self.queue.len() == 1;
+        return (trigger, self.queue.len() < self.queueLen);
+    }
+
     //return: (trigger, hasSpace)
     pub fn EnqSocket(
         &mut self,

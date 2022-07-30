@@ -60,6 +60,7 @@ use super::super::socket::*;
 use super::super::unix::transport::unix::*;
 use super::rdma_socket::*;
 use super::hostsocket::*;
+use super::asyncsocket::*;
 
 lazy_static! {
     pub static ref DUMMY_HOST_SOCKET : DummyHostSocket = DummyHostSocket::New();
@@ -1952,7 +1953,7 @@ impl Provider for SocketProvider {
         if SHARESPACE.config.read().UringIO
             && (self.family == AFType::AF_INET || self.family == AFType::AF_INET6)
             && stype == SockType::SOCK_STREAM {
-            let socketType = SocketBufType::TCPInit;
+            /*let socketType = SocketBufType::TCPInit;
 
             file = newSocketFile(
                 task,
@@ -1961,6 +1962,17 @@ impl Provider for SocketProvider {
                 stype & SocketType::SOCK_TYPE_MASK,
                 nonblocking,
                 socketType,
+                None,
+            )?;*/
+
+            let sockState = SockState::TCPInit;
+            file = newAsyncSocketFile(
+                task,
+                self.family,
+                fd,
+                stype & SocketType::SOCK_TYPE_MASK,
+                nonblocking,
+                sockState,
                 None,
             )?;
         } else {
