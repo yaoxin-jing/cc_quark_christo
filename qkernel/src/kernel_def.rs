@@ -19,6 +19,7 @@ use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 
 use crate::qlib::fileinfo::*;
+use crate::qlib::kernel::IOURING;
 
 use super::qlib::kernel::asm::*;
 use super::qlib::kernel::taskMgr::*;
@@ -418,4 +419,9 @@ impl AsyncSocketOperations {
     pub fn Notify(&self, _mask: EventMask) {
         panic!("AsyncSocketOperations get notify in kernel");
     }
+}
+
+pub fn EpollCtl(epollfd: i32, fd: i32, op: i32, mask: EventMask) -> Result<()> {
+    IOURING.EpollCtl(epollfd, fd, op as i32, mask as u32);
+    return Ok(());
 }

@@ -86,7 +86,8 @@ extern "C" fn handle_sigintAct(signal: i32, signInfo: *mut libc::siginfo_t, addr
                 &*(addr as * const UContext)
             };
 
-            error!("ALLOCATOR is {:x?}", crate::ALLOCATOR);
+            error!("get signal {}, context {:x?}", signal, &ucontext);
+            //error!("ALLOCATOR is {:x?}", crate::ALLOCATOR);
 
             /*backtrace::trace(|frame| {
                 print!("panic frame is {:#x?}", frame);

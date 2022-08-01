@@ -27,12 +27,13 @@ use crate::qlib::kernel::IOURING;
 use crate::qlib::rdmasocket::*;
 use crate::qlib::kernel::socket::hostinet::asyncsocket::*;
 use crate::qlib::*;
+use crate::kernel_def::EpollCtl;
 
 #[derive(Clone)]
 pub enum SockInfo {
     File,                             // it is not socket
     Socket(SocketInfo),                           // normal socket
-    AsyncSocket(AsyncSocketOperations),
+    AsyncSocket(AsyncSocketOperationsWeak),
     RDMAServerSocket(RDMAServerSock), //
     RDMADataSocket(RDMADataSock),     //
     RDMAContext,
@@ -67,7 +68,13 @@ impl SockInfo {
                 waitinfo.Notify(eventmask);
             }
             Self::AsyncSocket(ref asyncSocket) => {
-                asyncSocket.Notify(eventmask);
+                match asyncSocket.Upgrade() {
+                    None => (),
+                    Some(s) => {
+                        s.Notify(eventmask);
+                    }
+                }
+
             }
             Self::RDMAServerSocket(ref sock) => sock.Notify(eventmask, waitinfo),
             Self::RDMADataSocket(ref sock) => sock.Notify(eventmask, waitinfo),
@@ -225,8 +232,7 @@ impl FdWaitInfo {
 
         let mask = mask | LibcConst::EPOLLET as u64;
 
-        IOURING.EpollCtl(epollfd, fd, op as i32, mask as u32);
-        return Ok(());
+        return EpollCtl(epollfd, fd, op as i32, mask);
     }
 
     pub fn Notify(&self, mask: EventMask) {

@@ -18,6 +18,7 @@ use crate::qlib::fileinfo::*;
 use crate::qlib::kernel::Kernel::HostSpace;
 use crate::qlib::kernel::GlobalIOMgr;
 use crate::qlib::kernel::kernel::waiter::Queue;
+use crate::kernel_def::EpollCtl;
 
 pub fn SetWaitInfo(fd: i32, queue: Queue) {
     GlobalIOMgr().SetWaitInfo(fd, queue);
@@ -29,6 +30,18 @@ pub fn UpdateFD(fd: i32) -> Result<()> {
 
 pub fn UpdateFDWithExtraMask(fd: i32, mask: EventMask) -> Result<()> {
     return GlobalIOMgr().UpdateFDWithExtraMask(fd, mask);
+}
+
+pub fn UpdateFDDirect(fd: i32, mask: EventMask) -> Result<()> {
+    return GlobalIOMgr().UpdateFDDirect(fd, mask);
+}
+
+pub fn UpdateFDMask(fd: i32, mask: EventMask) -> Result<()> {
+    return GlobalIOMgr().UpdateFDMask(fd, mask);
+}
+
+pub fn UpdateFDUnmask(fd: i32, mask: EventMask) -> Result<()> {
+    return GlobalIOMgr().UpdateFDUnmask(fd, mask);
 }
 
 pub fn NonBlockingPoll(fd: i32, mask: EventMask) -> EventMask {
@@ -70,6 +83,118 @@ impl IOMgr {
             let event = e.Event as EventMask;
             self.Notify(fd, event)
         }
+    }
+
+    pub fn UpdateFDMask(&self, fd: i32, mask: EventMask) -> Result<()> {
+        let fi = match self.FdWaitInfo(fd) {
+            None => return Ok(()),
+            Some(fi) => fi,
+        };
+
+        let op;
+        let mask = {
+            let mut fi = fi.lock();
+            let mask = fi.mask | mask;
+
+            if fi.mask == 0 {
+                if mask != 0 {
+                    op = LibcConst::EPOLL_CTL_ADD;
+                } else {
+                    return Ok(());
+                }
+            } else {
+                if mask == 0 {
+                    op = LibcConst::EPOLL_CTL_DEL;
+                } else {
+                    if mask | fi.mask == fi.mask {
+                        return Ok(());
+                    }
+                    op = LibcConst::EPOLL_CTL_MOD;
+                }
+            }
+
+            fi.mask = mask;
+            mask
+        };
+
+        let mask = mask | LibcConst::EPOLLET as u64;
+
+        let epollfd = self.Epollfd();
+        return EpollCtl(epollfd, fd, op as i32, mask);
+    }
+
+    pub fn UpdateFDUnmask(&self, fd: i32, mask: EventMask) -> Result<()> {
+        let fi = match self.FdWaitInfo(fd) {
+            None => return Ok(()),
+            Some(fi) => fi,
+        };
+
+        let op;
+        let mask = {
+            let mut fi = fi.lock();
+            let mask = fi.mask & (!mask);
+
+            if fi.mask == 0 {
+                if mask != 0 {
+                    op = LibcConst::EPOLL_CTL_ADD;
+                } else {
+                    return Ok(());
+                }
+            } else {
+                if mask == 0 {
+                    op = LibcConst::EPOLL_CTL_DEL;
+                } else {
+                    if mask | fi.mask == fi.mask {
+                        return Ok(());
+                    }
+                    op = LibcConst::EPOLL_CTL_MOD;
+                }
+            }
+
+            fi.mask = mask;
+            mask
+        };
+
+        let mask = mask | LibcConst::EPOLLET as u64;
+
+        let epollfd = self.Epollfd();
+        return EpollCtl(epollfd, fd, op as i32, mask);
+    }
+
+    pub fn UpdateFDDirect(&self, fd: i32, mask: EventMask) -> Result<()> {
+        let fi = match self.FdWaitInfo(fd) {
+            None => return Ok(()),
+            Some(fi) => fi,
+        };
+
+        let op;
+        {
+            let mut fi = fi.lock();
+
+            if fi.mask == 0 {
+                if mask != 0 {
+                    op = LibcConst::EPOLL_CTL_ADD;
+                } else {
+                    return Ok(());
+                }
+            } else {
+                if mask == 0 {
+                    op = LibcConst::EPOLL_CTL_DEL;
+                } else {
+                    if mask | fi.mask == fi.mask {
+                        return Ok(());
+                    }
+                    op = LibcConst::EPOLL_CTL_MOD;
+                }
+            }
+
+            fi.mask = mask;
+        };
+
+        let mask = mask | LibcConst::EPOLLET as u64;
+
+        let epollfd = self.Epollfd();
+        return EpollCtl(epollfd, fd, op as i32, mask);
     }
 
     pub fn UpdateFD(&self, fd: i32) -> Result<()> {
@@ -123,7 +248,8 @@ impl IOMgr {
         let fdInfo = match self.GetByHost(fd) {
             Some(info) => info,
             None => {
-                panic!("UpdateWaitInfo panic...")
+                // race condition. the fd has been closed and the fdinfo has been remvoed
+                return
             }
         };
 

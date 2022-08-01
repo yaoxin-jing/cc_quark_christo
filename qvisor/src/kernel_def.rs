@@ -32,6 +32,7 @@ use super::URING_MGR;
 use super::VMS;
 use super::vmspace::VMSpace;
 use crate::SHARE_SPACE;
+use crate::qlib::kernel::guestfdnotifier::*;
 
 impl std::error::Error for Error {}
 
@@ -318,16 +319,16 @@ impl UringAsyncMgr {
     }
 }
 
-impl AsyncSocketOperations {
-    pub fn GetRet(ret: i64) -> i64 {
-        if ret == -1 {
-            //info!("get error, errno is {}", errno::errno().0);
-            return -errno::errno().0 as i64;
-        }
-
-        return ret;
+pub fn GetRet(ret: i64) -> i64 {
+    if ret == -1 {
+        //info!("get error, errno is {}", errno::errno().0);
+        return -errno::errno().0 as i64;
     }
 
+    return ret;
+}
+
+impl AsyncSocketOperations {
     pub fn IOAccept(&self) -> Result<AcceptItem> {
         let mut ai = AcceptItem::default();
         ai.len = ai.addr.data.len() as _;
@@ -406,6 +407,8 @@ impl AsyncSocketOperations {
                     }
 
                     if !hasSpace {
+                        let fd = self.fd;
+                        UpdateFDUnmask(fd, EVENT_IN).unwrap();
                         break;
                     }
                 }
@@ -423,7 +426,7 @@ impl AsyncSocketOperations {
                         };
 
                         let result = if ret < 0 {
-                            Self::GetRet(ret as i64) as i32
+                            GetRet(ret as i64) as i32
                         } else {
                             ret as i32
                         };
@@ -462,6 +465,10 @@ impl AsyncSocketOperations {
                     if buf.PendingWriteShutdown() {
                         queue.Notify(EVENT_PENDING_SHUTDOWN);
                     }
+
+                    if addr == 0 { // no more data
+                        UpdateFDUnmask(fd, EVENT_OUT).unwrap();
+                    }
                 }
 
                 if mask & EVENT_IN != 0 {
@@ -472,7 +479,7 @@ impl AsyncSocketOperations {
                         };
 
                         let result = if ret < 0 {
-                            Self::GetRet(ret as i64) as i32
+                            GetRet(ret as i64) as i32
                         } else {
                             ret as i32
                         };
@@ -502,14 +509,28 @@ impl AsyncSocketOperations {
                             queue.Notify(EventMaskFromLinux(READABLE_EVENT as u32));
                         }
 
+                        if result < len as _ {
+                            break;
+                        }
+
                         addr = taddr;
                         len = tlen;
+                    }
+
+                    if addr == 0 { // no more space
+                        UpdateFDUnmask(fd, EVENT_IN).unwrap();
                     }
                 }
 
                 if mask & (EVENT_ERR | EVENT_HUP) != 0 {
-                    let result = unsafe {
+                    let ret = unsafe {
                         libc::read(fd, 0 as _, 0 as _) as i32
+                    };
+
+                    let result = if ret < 0 {
+                        GetRet(ret as i64) as i32
+                    } else {
+                        ret as i32
                     };
 
                     if result < 0 {
@@ -530,4 +551,24 @@ impl AsyncSocketOperations {
             }
         }
     }
+}
+
+pub fn EpollCtl(epollfd: i32, fd: i32, op: i32, mask: EventMask) -> Result<()> {
+    /*let ret = unsafe {
+        libc::epoll_ctl(epollfd, fd, op as _, mask as _)
+    };
+
+    let result = GetRet(ret as i64) as i32;
+    error!("EpollCtl1 {}/{}/{}/{:x}/{}", epollfd, fd, op, mask, result);
+    if result >= 0 {
+        return Ok(())
+    }
+
+    error!("EpollCtl2 {}/{}/{}/{:x}/{}", epollfd, fd, op, mask, result);
+
+    return Err(Error::SysError(-result))*/
+
+    use crate::qlib::kernel::IOURING;
+    IOURING.EpollCtl(epollfd, fd, op as i32, mask as u32);
+    return Ok(());
 }

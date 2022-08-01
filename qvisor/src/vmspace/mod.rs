@@ -42,6 +42,7 @@ use crate::qlib::fileinfo::*;
 use crate::vmspace::kernel::GlobalIOMgr;
 use crate::vmspace::kernel::GlobalRDMASvcCli;
 use crate::vmspace::kernel::kernel::waiter::EventMaskFromLinux;
+use crate::vmspace::kernel::guestfdnotifier::UpdateFDMask;
 
 use self::limits::*;
 use self::random::*;
@@ -803,6 +804,10 @@ impl VMSpace {
         let state = fdInfo.lock().sockInfo.lock().clone();
         match state {
             SockInfo::AsyncSocket(asyncSocket) => {
+                let asyncSocket = match asyncSocket.Upgrade() {
+                    None => return,
+                    Some(a) => a
+                };
                 let state = asyncSocket.SocketBufState();
                 let queue = asyncSocket.queue.clone();
                 let buf = match state {
@@ -825,9 +830,15 @@ impl VMSpace {
                     };
 
                     if result < 0 {
+                        if result == -SysErr::EAGAIN {
+                            UpdateFDMask(fd, EVENT_OUT).unwrap();
+                            return;
+                        }
+
                         buf.SetErr(-result);
                         queue.Notify(EventMaskFromLinux((EVENT_ERR | READABLE_EVENT) as u32));
-                        return;
+                        drop(asyncSocket);
+                        break;
                         //return true;
                     }
 
@@ -840,12 +851,10 @@ impl VMSpace {
                         } else {
                             queue.Notify(EventMaskFromLinux(WRITEABLE_EVENT as u32));
                         }
-                        return;
+                        break;
                     }
 
-                    error!("AsyncSocketWrite 1 fd {}", fd);
                     let (trigger, taddr, tlen) = buf.ConsumeAndGetAvailableWriteBuf(result as usize);
-                    error!("AsyncSocketWrite 2 fd {}", fd);
                     if trigger {
                         queue.Notify(EventMaskFromLinux(WRITEABLE_EVENT as u32));
                     }

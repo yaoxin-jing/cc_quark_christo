@@ -187,6 +187,9 @@ pub struct HostInodeOpIntern {
     pub hasMappable: bool,
 
     pub isMemfd: bool,
+
+    // need to close the hostfd?
+    pub drop: bool,
 }
 
 impl Default for HostInodeOpIntern {
@@ -204,20 +207,21 @@ impl Default for HostInodeOpIntern {
             bufWriteLock: QAsyncLock::default(),
             hasMappable: false,
             isMemfd: false,
+            drop: true,
         };
     }
 }
 
 impl Drop for HostInodeOpIntern {
     fn drop(&mut self) {
-        if self.HostFd == -1 {
+        if !self.drop || self.HostFd == -1 {
             //default fd
             return;
         }
 
         let task = Task::Current();
 
-        let _l = if self.BufWriteEnable() {
+        let _l = if self.BufWriteEnable() && self.CanMap() {
             Some(self.BufWriteLock().Lock(task))
         } else {
             None
@@ -257,7 +261,8 @@ impl HostInodeOpIntern {
             size: fstat.st_size,
             bufWriteLock: QAsyncLock::default(),
             hasMappable: false,
-            isMemfd: isMemfd
+            isMemfd: isMemfd,
+            drop: true,
         };
 
         if ret.CanMap() {
@@ -501,6 +506,10 @@ impl HostInodeOp {
         let ret = Self(intern);
         SetWaitInfo(fd, ret.lock().queue.clone());
         return ret;
+    }
+
+    pub fn DisableDrop(&self) {
+        self.lock().drop = false;
     }
 
     pub fn NewMemfdIops(len: i64) -> Result<Self> {

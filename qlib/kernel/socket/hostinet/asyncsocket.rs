@@ -14,6 +14,7 @@
 
 use crate::qlib::mutex::*;
 use alloc::sync::Arc;
+use alloc::sync::Weak;
 use alloc::vec::Vec;
 use core::any::Any;
 use core::fmt;
@@ -135,6 +136,14 @@ pub fn newAsyncSocketFile(
     return Ok(file)
 }
 
+pub struct AsyncSocketInfoIntern {
+    pub fd: i32,
+    pub queue: Queue,
+    pub state: QMutex<SockState>,
+}
+
+pub struct AsyncSocketInfo(Arc<AsyncSocketInfoIntern>);
+
 pub struct AsyncSocketOperationsIntern {
     pub send: AtomicI64,
     pub recv: AtomicI64,
@@ -146,6 +155,27 @@ pub struct AsyncSocketOperationsIntern {
     pub remoteAddr: QMutex<Option<SockAddr>>,
     pub hostops: HostInodeOp,
     passInq: AtomicBool,
+}
+
+/*
+impl Drop for AsyncSocketInfoIntern {
+    fn drop(&mut self) {
+        HostSpace::Close(self.fd);
+    }
+}*/
+
+#[derive(Clone)]
+pub struct AsyncSocketOperationsWeak(pub Weak<AsyncSocketOperationsIntern>);
+
+impl AsyncSocketOperationsWeak {
+    pub fn Upgrade(&self) -> Option<AsyncSocketOperations> {
+        let f = match self.0.upgrade() {
+            None => return None,
+            Some(f) => f,
+        };
+
+        return Some(AsyncSocketOperations(f));
+    }
 }
 
 #[derive(Clone)]
@@ -188,8 +218,10 @@ impl AsyncSocketOperations {
         let ret = Self(Arc::new(ret));
 
         let fdInfo = GlobalIOMgr().GetByHost(fd).expect("AsyncSocketOperations new fail");
-        *fdInfo.lock().sockInfo.lock() = SockInfo::AsyncSocket(ret.clone());
-        ret.Updatefd();
+        *fdInfo.lock().sockInfo.lock() = SockInfo::AsyncSocket(ret.Downgrade());
+
+        let defaultMask = ret.DefaultMask();
+        ret.Updatefd(defaultMask);
         return Ok(ret);
     }
 
@@ -204,6 +236,10 @@ impl Deref for AsyncSocketOperations {
 }
 
 impl AsyncSocketOperations {
+    pub fn Downgrade(&self) -> AsyncSocketOperationsWeak {
+        return AsyncSocketOperationsWeak(Arc::downgrade(&self.0));
+    }
+
     pub fn SetRemoteAddr(&self, addr: Vec<u8>) -> Result<()> {
         let addr = GetAddr(addr[0] as i16, &addr[0..addr.len()])?;
 
@@ -232,7 +268,7 @@ impl AsyncSocketOperations {
         }
     }
 
-    pub fn ExtraMask(&self) -> EventMask {
+    pub fn DefaultMask(&self) -> EventMask {
         match self.SocketBufState() {
             SockState::TCPInit => return 0,
             SockState::TCPConnecting => return EVENT_OUT | EVENT_ERR | EVENT_HUP,
@@ -241,15 +277,25 @@ impl AsyncSocketOperations {
         }
     }
 
-    pub fn Updatefd(&self) {
+    pub fn Updatefd(&self, mask: EventMask) {
         let fd = self.fd;
-        UpdateFDWithExtraMask(fd, self.ExtraMask()).unwrap();
+        UpdateFDDirect(fd, mask).unwrap();
+    }
+
+    pub fn UpdateFDMask(&self, mask: EventMask) {
+        let fd = self.fd;
+        UpdateFDMask(fd, mask).unwrap();
+    }
+
+    pub fn UpdateFDUnmask(&self, mask: EventMask) {
+        let fd = self.fd;
+        UpdateFDUnmask(fd, mask).unwrap();
     }
 
     pub fn AcceptData(&self, acceptQueue: &AcceptQueue) -> Result<AcceptItem> {
         let (trigger, acceptItem) = acceptQueue.lock().DeqSocket();
         if trigger {
-            self.Updatefd();
+            self.UpdateFDMask(EVENT_IN);
         }
 
         return acceptItem
@@ -281,7 +327,7 @@ impl AsyncSocketOperations {
         let (trigger, cnt) = self.SocketBuf().Readv(task, dsts, peek)?;
 
         if trigger {
-            self.Updatefd();
+            self.UpdateFDMask(EVENT_IN);
         }
 
         return Ok(cnt as i64);
@@ -330,31 +376,11 @@ impl Waitable for AsyncSocketOperations {
     fn EventRegister(&self, task: &Task, e: &WaitEntry, mask: EventMask) {
         let queue = self.queue.clone();
         queue.EventRegister(task, e, mask);
-        match self.SocketBufState() {
-            SockState::TCPInit => return,
-            SockState::TCPConnecting => return,
-            SockState::TCPServer(_) => {
-                self.Updatefd();
-            }
-            SockState::TCPData(_) =>{
-                self.Updatefd();
-            }
-        }
     }
 
     fn EventUnregister(&self, task: &Task, e: &WaitEntry) {
         let queue = self.queue.clone();
         queue.EventUnregister(task, e);
-        match self.SocketBufState() {
-            SockState::TCPInit => return,
-            SockState::TCPConnecting => return,
-            SockState::TCPServer(_) => {
-                self.Updatefd();
-            }
-            SockState::TCPData(_) =>{
-                self.Updatefd();
-            }
-        }
     }
 }
 
@@ -506,7 +532,7 @@ impl FileOperations for AsyncSocketOperations {
 
 
 impl SockOperations for AsyncSocketOperations {
-    fn Connect(&self, task: &Task, sockaddr: &[u8], blocking: bool) -> Result<i64> {
+    fn Connect(&self, task: &Task, sockaddr: &[u8], _blocking: bool) -> Result<i64> {
         let mut socketaddr = sockaddr;
 
         if (self.family == AFType::AF_INET || self.family == AFType::AF_INET6)
@@ -521,20 +547,32 @@ impl SockOperations for AsyncSocketOperations {
             socketaddr.len() as u32,
         ) as i32;
 
-        if res == 0 {
-            self.SetRemoteAddr(socketaddr.to_vec())?;
-            return Ok(0);
-        }
-
+        let blocking = true;
         if res != 0 {
             if -res != SysErr::EINPROGRESS || !blocking {
                 return Err(Error::SysError(-res));
             }
 
+            /*if -res != SysErr::EINPROGRESS {
+                return Err(Error::SysError(-res));
+            }
+
+            if !blocking {
+                self.SetRemoteAddr(socketaddr.to_vec())?;
+                *self.state.lock() = SockState::TCPConnecting;
+                return Err(Error::SysError(-res));
+            }*/
+
+            *self.state.lock() = SockState::TCPConnecting;
+
             //todo: which one is more efficent?
             let general = task.blocker.generalEntry.clone();
             self.EventRegister(task, &general, EVENT_OUT);
-            defer!(self.EventUnregister(task, &general));
+            self.Updatefd(EVENT_OUT | EVENT_HUP | EVENT_ERR);
+            defer!({
+                self.EventUnregister(task, &general);
+                self.Updatefd(0);
+            });
 
             if self.Readiness(task, WRITEABLE_EVENT) == 0 {
                 match task.blocker.BlockWithMonoTimer(true, None) {
@@ -549,6 +587,7 @@ impl SockOperations for AsyncSocketOperations {
             }
         }
 
+        self.SetRemoteAddr(socketaddr.to_vec())?;
         let mut val: i32 = 0;
         let len: i32 = 4;
         let res = HostSpace::GetSockOpt(
@@ -567,7 +606,10 @@ impl SockOperations for AsyncSocketOperations {
             return Err(Error::SysError(val as i32));
         }
 
-        self.SetRemoteAddr(socketaddr.to_vec())?;
+        let sockbuf = Arc::new(SocketBuff::Init(MemoryDef::DEFAULT_BUF_PAGE_COUNT));
+        *self.state.lock() = SockState::TCPData(sockbuf);
+        let defaultMask = self.DefaultMask();
+        self.Updatefd(defaultMask);
         return Ok(0);
     }
 
@@ -712,12 +754,23 @@ impl SockOperations for AsyncSocketOperations {
         acceptQueue.lock().SetQueueLen(len as usize);
         *self.state.lock() = SockState::TCPServer(acceptQueue);
 
-        self.Updatefd();
+        self.Updatefd(EVENT_IN | EVENT_ERR | EVENT_HUP);
         return Ok(res);
     }
 
-    fn Shutdown(&self, _task: &Task, how: i32) -> Result<i64> {
+    fn Shutdown(&self, task: &Task, how: i32) -> Result<i64> {
         let how = how as u64;
+
+        if self.SocketBuf().HasWriteData() {
+            self.SocketBuf().SetPendingWriteShutdown();
+            let general = task.blocker.generalEntry.clone();
+            self.EventRegister(task, &general, EVENT_PENDING_SHUTDOWN);
+            defer!(self.EventUnregister(task, &general));
+
+            while self.SocketBuf().HasWriteData() {
+                task.blocker.BlockGeneralOnly();
+            }
+        }
 
         if how == LibcConst::SHUT_RD || how == LibcConst::SHUT_WR || how == LibcConst::SHUT_RDWR {
             let res = Kernel::HostSpace::Shutdown(self.fd, how as i32);
