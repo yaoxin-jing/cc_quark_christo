@@ -33,7 +33,7 @@ use crate::kernel_def::EpollCtl;
 pub enum SockInfo {
     File,                             // it is not socket
     Socket(SocketInfo),                           // normal socket
-    AsyncSocket(AsyncSocketOperationsWeak),
+    AsyncSocket(AsyncSocketInfo),
     RDMAServerSocket(RDMAServerSock), //
     RDMADataSocket(RDMADataSock),     //
     RDMAContext,
@@ -68,13 +68,7 @@ impl SockInfo {
                 waitinfo.Notify(eventmask);
             }
             Self::AsyncSocket(ref asyncSocket) => {
-                match asyncSocket.Upgrade() {
-                    None => (),
-                    Some(s) => {
-                        s.Notify(eventmask);
-                    }
-                }
-
+                asyncSocket.Notify(eventmask);
             }
             Self::RDMAServerSocket(ref sock) => sock.Notify(eventmask, waitinfo),
             Self::RDMADataSocket(ref sock) => sock.Notify(eventmask, waitinfo),

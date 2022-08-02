@@ -3,6 +3,7 @@ use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 use libc::*;
 use std::fmt;
+use alloc::sync::Arc;
 
 use super::qlib::kernel::kernel::waiter::EventMaskFromLinux;
 use super::qlib::kernel::quring::uring_async::UringAsyncMgr;
@@ -328,7 +329,7 @@ pub fn GetRet(ret: i64) -> i64 {
     return ret;
 }
 
-impl AsyncSocketOperations {
+impl AsyncSocketInfo {
     pub fn IOAccept(&self) -> Result<AcceptItem> {
         let mut ai = AcceptItem::default();
         ai.len = ai.addr.data.len() as _;
@@ -345,6 +346,63 @@ impl AsyncSocketOperations {
         return Ok(ai);
     }
 
+    // ret: whether there is still data left
+    pub fn WriteData(&self, buf: &Arc<SocketBuff>) -> bool {
+        let fd = self.fd;
+        let queue = self.queue.clone();
+        let _l = match self.writelock.try_lock() {
+            None => return false,
+            Some(l) => l
+        };
+        let (mut addr, mut len) = buf.GetAvailableWriteBuf();
+        while addr > 0 {
+            let ret = unsafe {
+                libc::write(fd, addr as _, len as _)
+            };
+
+            let result = if ret < 0 {
+                GetRet(ret as i64) as i32
+            } else {
+                ret as i32
+            };
+
+            if result < 0 {
+                if result == -SysErr::EAGAIN {
+                    break;
+                }
+                buf.SetErr(-result);
+                queue.Notify(EventMaskFromLinux((EVENT_ERR | READABLE_EVENT) as u32));
+                return false;
+                //return true;
+            }
+
+            // EOF
+            // to debug
+            if result == 0 {
+                buf.SetWClosed();
+                if buf.ProduceReadBuf(0) {
+                    queue.Notify(EventMaskFromLinux(WRITEABLE_EVENT as u32));
+                } else {
+                    queue.Notify(EventMaskFromLinux(WRITEABLE_EVENT as u32));
+                }
+                return false;
+            }
+
+            let (trigger, taddr, tlen) = buf.ConsumeAndGetAvailableWriteBuf(result as usize);
+            if trigger {
+                queue.Notify(EventMaskFromLinux(WRITEABLE_EVENT as u32));
+            }
+
+            addr = taddr;
+            len = tlen;
+        }
+
+        if buf.PendingWriteShutdown() {
+            queue.Notify(EVENT_PENDING_SHUTDOWN);
+        }
+
+        return addr != 0
+    }
 
     pub fn Notify(&self, mask: EventMask) {
         let state = self.SocketBufState();
@@ -419,54 +477,9 @@ impl AsyncSocketOperations {
 
                 let fd = self.fd;
                 if mask & EVENT_OUT != 0 {
-                    let (mut addr, mut len) = buf.GetAvailableWriteBuf();
-                    while addr > 0 {
-                        let ret = unsafe {
-                            libc::write(fd, addr as _, len as _)
-                        };
+                    let hasMoreData = self.WriteData(&buf);
 
-                        let result = if ret < 0 {
-                            GetRet(ret as i64) as i32
-                        } else {
-                            ret as i32
-                        };
-
-                        if result < 0 {
-                            if result == -SysErr::EAGAIN {
-                                break;
-                            }
-                            buf.SetErr(-result);
-                            queue.Notify(EventMaskFromLinux((EVENT_ERR | READABLE_EVENT) as u32));
-                            return;
-                            //return true;
-                        }
-
-                        // EOF
-                        // to debug
-                        if result == 0 {
-                            buf.SetWClosed();
-                            if buf.ProduceReadBuf(0) {
-                                queue.Notify(EventMaskFromLinux(WRITEABLE_EVENT as u32));
-                            } else {
-                                queue.Notify(EventMaskFromLinux(WRITEABLE_EVENT as u32));
-                            }
-                            return;
-                        }
-
-                        let (trigger, taddr, tlen) = buf.ConsumeAndGetAvailableWriteBuf(result as usize);
-                        if trigger {
-                            queue.Notify(EventMaskFromLinux(WRITEABLE_EVENT as u32));
-                        }
-
-                        addr = taddr;
-                        len = tlen;
-                    }
-
-                    if buf.PendingWriteShutdown() {
-                        queue.Notify(EVENT_PENDING_SHUTDOWN);
-                    }
-
-                    if addr == 0 { // no more data
+                    if !hasMoreData { // no more data
                         UpdateFDUnmask(fd, EVENT_OUT).unwrap();
                     }
                 }

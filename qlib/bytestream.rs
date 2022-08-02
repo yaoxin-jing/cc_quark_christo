@@ -354,6 +354,8 @@ impl RingBuf {
         self.headtail[0].store(head.wrapping_add(count as u32), Ordering::Release);
 
         let tail = self.headtail[1].load(Ordering::Acquire);
+
+        assert!(tail>=head, "Consume {:x?}", &self.headtail);
         let available = tail.wrapping_sub(head) as usize;
         let trigger = available == self.Len();
         return trigger
@@ -392,14 +394,13 @@ impl RingBuf {
             return;
         }
 
-        //error!("GetSpaceIovs available is {}", self.available);
+        //error!("GetSpaceIovs available is {}/{:?}", available, &self.headtail);
         assert!(iovs.len() >= 2);
         let writePos = (tail & self.ringMask) as usize;
         let writeSize = self.Len() - available;
 
         let toEnd = self.Len() - writePos;
 
-        //error!("GetSpaceIovs available is {}, toEnd is {}", self.available, toEnd);
         if toEnd < writeSize {
             iovs[0].start = &self.Buf()[writePos as usize] as *const _ as u64;
             iovs[0].len = toEnd as usize;

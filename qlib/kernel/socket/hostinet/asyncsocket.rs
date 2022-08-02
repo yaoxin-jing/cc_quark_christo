@@ -121,6 +121,8 @@ pub fn newAsyncSocketFile(
         addr,
     )?;
 
+    hostiops.DisableDrop();
+
     let file = File::New(
         &dirent,
         &FileFlags {
@@ -140,29 +142,58 @@ pub struct AsyncSocketInfoIntern {
     pub fd: i32,
     pub queue: Queue,
     pub state: QMutex<SockState>,
+    pub writelock: QMutex<()>,
 }
 
+impl Drop for AsyncSocketInfoIntern {
+    fn drop(&mut self) {
+        HostSpace::Close(self.fd);
+    }
+}
+
+#[derive(Clone)]
 pub struct AsyncSocketInfo(Arc<AsyncSocketInfoIntern>);
+
+impl Deref for AsyncSocketInfo {
+    type Target = Arc<AsyncSocketInfoIntern>;
+
+    fn deref(&self) -> &Arc<AsyncSocketInfoIntern> {
+        &self.0
+    }
+}
+
+impl AsyncSocketInfo {
+    pub fn New(fd: i32, queue: Queue, state: SockState) -> Self {
+        let intern = AsyncSocketInfoIntern {
+            fd,
+            queue: queue,
+            state: QMutex::new(state),
+            writelock: QMutex::new(())
+        };
+
+        return Self(Arc::new(intern))
+    }
+
+    pub fn SetState(&self, state: SockState) {
+        *self.state.lock() = state;
+    }
+
+
+    pub fn SocketBufState(&self) -> SockState {
+        return self.state.lock().clone();
+    }
+}
 
 pub struct AsyncSocketOperationsIntern {
     pub send: AtomicI64,
     pub recv: AtomicI64,
     pub family: i32,
     pub stype: i32,
-    pub fd: i32,
-    pub queue: Queue,
-    pub state: QMutex<SockState>,
+    pub socketInfo: AsyncSocketInfo,
     pub remoteAddr: QMutex<Option<SockAddr>>,
     pub hostops: HostInodeOp,
     passInq: AtomicBool,
 }
-
-/*
-impl Drop for AsyncSocketInfoIntern {
-    fn drop(&mut self) {
-        HostSpace::Close(self.fd);
-    }
-}*/
 
 #[derive(Clone)]
 pub struct AsyncSocketOperationsWeak(pub Weak<AsyncSocketOperationsIntern>);
@@ -207,10 +238,8 @@ impl AsyncSocketOperations {
             recv: AtomicI64::new(0),
             family,
             stype,
-            fd,
-            queue,
+            socketInfo: AsyncSocketInfo::New(fd, queue, state),
             remoteAddr: QMutex::new(addr),
-            state: QMutex::new(state),
             hostops: hostops,
             passInq: AtomicBool::new(false),
         };
@@ -218,7 +247,7 @@ impl AsyncSocketOperations {
         let ret = Self(Arc::new(ret));
 
         let fdInfo = GlobalIOMgr().GetByHost(fd).expect("AsyncSocketOperations new fail");
-        *fdInfo.lock().sockInfo.lock() = SockInfo::AsyncSocket(ret.Downgrade());
+        *fdInfo.lock().sockInfo.lock() = SockInfo::AsyncSocket(ret.socketInfo.clone());
 
         let defaultMask = ret.DefaultMask();
         ret.Updatefd(defaultMask);
@@ -254,22 +283,18 @@ impl AsyncSocketOperations {
         };
     }
 
-    pub fn SocketBufState(&self) -> SockState {
-        return self.state.lock().clone();
-    }
-
     pub fn SocketBuf(&self) -> Arc<SocketBuff> {
-        match self.SocketBufState() {
+        match self.socketInfo.SocketBufState() {
             SockState::TCPData(b) => return b,
             _ => panic!(
                 "SocketBufType::None has no SockBuff {:?}",
-                self.SocketBufState()
+                self.socketInfo.SocketBufState()
             ),
         }
     }
 
     pub fn DefaultMask(&self) -> EventMask {
-        match self.SocketBufState() {
+        match self.socketInfo.SocketBufState() {
             SockState::TCPInit => return 0,
             SockState::TCPConnecting => return EVENT_OUT | EVENT_ERR | EVENT_HUP,
             SockState::TCPServer(_) => return EVENT_IN | EVENT_ERR | EVENT_HUP,
@@ -278,17 +303,17 @@ impl AsyncSocketOperations {
     }
 
     pub fn Updatefd(&self, mask: EventMask) {
-        let fd = self.fd;
+        let fd = self.socketInfo.fd;
         UpdateFDDirect(fd, mask).unwrap();
     }
 
     pub fn UpdateFDMask(&self, mask: EventMask) {
-        let fd = self.fd;
+        let fd = self.socketInfo.fd;
         UpdateFDMask(fd, mask).unwrap();
     }
 
     pub fn UpdateFDUnmask(&self, mask: EventMask) {
-        let fd = self.fd;
+        let fd = self.socketInfo.fd;
         UpdateFDUnmask(fd, mask).unwrap();
     }
 
@@ -342,7 +367,7 @@ impl AsyncSocketOperations {
         let (count, writeBuf) = self.SocketBuf().Writev(task, srcs)?;
 
         if let Some(_) = writeBuf {
-            HostSpace::AsyncSocketWrite(self.fd)
+            HostSpace::AsyncSocketWrite(self.socketInfo.fd)
         }
 
         return Ok(count as i64);
@@ -354,13 +379,13 @@ pub const SIZEOF_SOCKADDR: usize = SocketSize::SIZEOF_SOCKADDR_INET6;
 
 impl Waitable for AsyncSocketOperations {
     fn AsyncReadiness(&self, _task: &Task, mask: EventMask, wait: &MultiWait) -> Future<EventMask> {
-        let fd = self.fd;
+        let fd = self.socketInfo.fd;
         let future = IOURING.UnblockPollAdd(fd, mask as u32, wait);
         return future;
     }
 
     fn Readiness(&self, _task: &Task, mask: EventMask) -> EventMask {
-        let state = self.SocketBufState();
+        let state = self.socketInfo.SocketBufState();
         match state {
             SockState::TCPInit => return 0,
             SockState::TCPConnecting => return 0,
@@ -374,12 +399,12 @@ impl Waitable for AsyncSocketOperations {
     }
 
     fn EventRegister(&self, task: &Task, e: &WaitEntry, mask: EventMask) {
-        let queue = self.queue.clone();
+        let queue = self.socketInfo.queue.clone();
         queue.EventRegister(task, e, mask);
     }
 
     fn EventUnregister(&self, task: &Task, e: &WaitEntry) {
-        let queue = self.queue.clone();
+        let queue = self.socketInfo.queue.clone();
         queue.EventUnregister(task, e);
     }
 }
@@ -470,7 +495,7 @@ impl FileOperations for AsyncSocketOperations {
     fn Ioctl(&self, task: &Task, _f: &File, _fd: i32, request: u64, val: u64) -> Result<()> {
         let flags = request as i32;
 
-        let hostfd = self.fd;
+        let hostfd = self.socketInfo.fd;
         match flags as u64 {
             LibcConst::SIOCGIFFLAGS
             | LibcConst::SIOCGIFBRDADDR
@@ -496,7 +521,7 @@ impl FileOperations for AsyncSocketOperations {
             }
             LibcConst::TIOCINQ => {
                 let tmp: i32 = 0;
-                let res = Kernel::HostSpace::IoCtl(self.fd, request, &tmp as *const _ as u64);
+                let res = Kernel::HostSpace::IoCtl(self.socketInfo.fd, request, &tmp as *const _ as u64);
                 if res < 0 {
                     return Err(Error::SysError(-res as i32));
                 }
@@ -505,7 +530,7 @@ impl FileOperations for AsyncSocketOperations {
             }
             _ => {
                 let tmp: i32 = 0;
-                let res = Kernel::HostSpace::IoCtl(self.fd, request, &tmp as *const _ as u64);
+                let res = Kernel::HostSpace::IoCtl(self.socketInfo.fd, request, &tmp as *const _ as u64);
                 if res < 0 {
                     return Err(Error::SysError(-res as i32));
                 }
@@ -542,7 +567,7 @@ impl SockOperations for AsyncSocketOperations {
             }
 
         let res = Kernel::HostSpace::IOConnect(
-            self.fd,
+            self.socketInfo.fd,
             &socketaddr[0] as *const _ as u64,
             socketaddr.len() as u32,
         ) as i32;
@@ -563,7 +588,7 @@ impl SockOperations for AsyncSocketOperations {
                 return Err(Error::SysError(-res));
             }*/
 
-            *self.state.lock() = SockState::TCPConnecting;
+            self.socketInfo.SetState(SockState::TCPConnecting);
 
             //todo: which one is more efficent?
             let general = task.blocker.generalEntry.clone();
@@ -587,11 +612,10 @@ impl SockOperations for AsyncSocketOperations {
             }
         }
 
-        self.SetRemoteAddr(socketaddr.to_vec())?;
         let mut val: i32 = 0;
         let len: i32 = 4;
         let res = HostSpace::GetSockOpt(
-            self.fd,
+            self.socketInfo.fd,
             LibcConst::SOL_SOCKET as i32,
             LibcConst::SO_ERROR as i32,
             &mut val as *mut i32 as u64,
@@ -606,8 +630,9 @@ impl SockOperations for AsyncSocketOperations {
             return Err(Error::SysError(val as i32));
         }
 
+        self.SetRemoteAddr(socketaddr.to_vec())?;
         let sockbuf = Arc::new(SocketBuff::Init(MemoryDef::DEFAULT_BUF_PAGE_COUNT));
-        *self.state.lock() = SockState::TCPData(sockbuf);
+        self.socketInfo.SetState(SockState::TCPData(sockbuf));
         let defaultMask = self.DefaultMask();
         self.Updatefd(defaultMask);
         return Ok(0);
@@ -621,7 +646,7 @@ impl SockOperations for AsyncSocketOperations {
         flags: i32,
         blocking: bool,
     ) -> Result<i64> {
-        let acceptQueue = match self.SocketBufState() {
+        let acceptQueue = match self.socketInfo.SocketBufState() {
             SockState::TCPServer(ref queue) => queue.clone(),
             _ => {
                 return Err(Error::SysError(SysErr::EINVAL));
@@ -684,7 +709,7 @@ impl SockOperations for AsyncSocketOperations {
         let fd = acceptItem.fd;
 
         let remoteAddr = &acceptItem.addr.data[0..len];
-        let state = self.state.lock().Accept(acceptItem.sockBuf.clone());
+        let state = self.socketInfo.SocketBufState().Accept(acceptItem.sockBuf.clone());
 
         let file = newAsyncSocketFile(
             task,
@@ -718,7 +743,7 @@ impl SockOperations for AsyncSocketOperations {
             }
 
         let res = Kernel::HostSpace::Bind(
-            self.fd,
+            self.socketInfo.fd,
             &socketaddr[0] as *const _ as u64,
             socketaddr.len() as u32,
             task.Umask(),
@@ -737,13 +762,13 @@ impl SockOperations for AsyncSocketOperations {
             backlog
         };
 
-        let res = Kernel::HostSpace::Listen(self.fd, len, false);
+        let res = Kernel::HostSpace::Listen(self.socketInfo.fd, len, false);
 
         if res < 0 {
             return Err(Error::SysError(-res as i32));
         }
 
-        let acceptQueue = match self.SocketBufState() {
+        let acceptQueue = match self.socketInfo.SocketBufState() {
             SockState::TCPServer(q) => {
                 q.lock().SetQueueLen(len as usize);
                 return Ok(0);
@@ -752,7 +777,7 @@ impl SockOperations for AsyncSocketOperations {
         };
 
         acceptQueue.lock().SetQueueLen(len as usize);
-        *self.state.lock() = SockState::TCPServer(acceptQueue);
+        self.socketInfo.SetState(SockState::TCPServer(acceptQueue));
 
         self.Updatefd(EVENT_IN | EVENT_ERR | EVENT_HUP);
         return Ok(res);
@@ -773,7 +798,7 @@ impl SockOperations for AsyncSocketOperations {
         }
 
         if how == LibcConst::SHUT_RD || how == LibcConst::SHUT_WR || how == LibcConst::SHUT_RDWR {
-            let res = Kernel::HostSpace::Shutdown(self.fd, how as i32);
+            let res = Kernel::HostSpace::Shutdown(self.socketInfo.fd, how as i32);
             if res < 0 {
                 return Err(Error::SysError(-res as i32));
             }
@@ -861,7 +886,7 @@ impl SockOperations for AsyncSocketOperations {
         let mut optLen = opt.len();
         let res = if optLen == 0 {
             Kernel::HostSpace::GetSockOpt(
-                self.fd,
+                self.socketInfo.fd,
                 level,
                 name,
                 ptr::null::<u8>() as u64,
@@ -869,7 +894,7 @@ impl SockOperations for AsyncSocketOperations {
             )
         } else {
             Kernel::HostSpace::GetSockOpt(
-                self.fd,
+                self.socketInfo.fd,
                 level,
                 name,
                 &mut opt[0] as *mut _ as u64,
@@ -918,7 +943,7 @@ impl SockOperations for AsyncSocketOperations {
         let optLen = opt.len();
         let res = if optLen == 0 {
             Kernel::HostSpace::SetSockOpt(
-                self.fd,
+                self.socketInfo.fd,
                 level,
                 name,
                 ptr::null::<u8>() as u64,
@@ -926,7 +951,7 @@ impl SockOperations for AsyncSocketOperations {
             )
         } else {
             Kernel::HostSpace::SetSockOpt(
-                self.fd,
+                self.socketInfo.fd,
                 level,
                 name,
                 &opt[0] as *const _ as u64,
@@ -946,7 +971,7 @@ impl SockOperations for AsyncSocketOperations {
         let len = socketaddr.len() as i32;
 
         let res = Kernel::HostSpace::GetSockName(
-            self.fd,
+            self.socketInfo.fd,
             &socketaddr[0] as *const _ as u64,
             &len as *const _ as u64,
         );
@@ -960,7 +985,7 @@ impl SockOperations for AsyncSocketOperations {
     fn GetPeerName(&self, _task: &Task, socketaddr: &mut [u8]) -> Result<i64> {
         let len = socketaddr.len() as i32;
         let res = Kernel::HostSpace::GetPeerName(
-            self.fd,
+            self.socketInfo.fd,
             &socketaddr[0] as *const _ as u64,
             &len as *const _ as u64,
         );
@@ -1210,7 +1235,7 @@ impl SockOperations for AsyncSocketOperations {
         let mut info = TCPInfo::default();
         let mut len = SocketSize::SIZEOF_TCPINFO;
 
-        let ret = HostSpace::GetSockOpt(self.fd,
+        let ret = HostSpace::GetSockOpt(self.socketInfo.fd,
                                         LibcConst::SOL_TCP as _,
                                         LibcConst::TCP_INFO as _,
                                         &mut info as * mut _ as u64,
@@ -1218,7 +1243,7 @@ impl SockOperations for AsyncSocketOperations {
 
         if ret < 0 {
             if ret != -SysErr::ENOPROTOOPT {
-                error!("fail to Failed to get TCP socket info from {} with error {}", self.fd, ret);
+                error!("fail to Failed to get TCP socket info from {} with error {}", self.socketInfo.fd, ret);
 
                 // For non-TCP sockets, silently ignore the failure.
                 return 0;

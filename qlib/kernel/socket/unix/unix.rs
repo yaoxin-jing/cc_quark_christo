@@ -1752,6 +1752,8 @@ impl Provider for UnixSocketProvider {
             return Err(Error::SysError(SysErr::EPROTONOSUPPORT));
         }
 
+        let stype = stype & SocketType::SOCK_TYPE_MASK;
+
         // Create the endpoint and socket.
         match stype {
             SockType::SOCK_DGRAM => {

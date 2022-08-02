@@ -41,8 +41,6 @@ use x86_64::structures::paging::PageTableFlags;
 use crate::qlib::fileinfo::*;
 use crate::vmspace::kernel::GlobalIOMgr;
 use crate::vmspace::kernel::GlobalRDMASvcCli;
-use crate::vmspace::kernel::kernel::waiter::EventMaskFromLinux;
-use crate::vmspace::kernel::guestfdnotifier::UpdateFDMask;
 
 use self::limits::*;
 use self::random::*;
@@ -804,68 +802,14 @@ impl VMSpace {
         let state = fdInfo.lock().sockInfo.lock().clone();
         match state {
             SockInfo::AsyncSocket(asyncSocket) => {
-                let asyncSocket = match asyncSocket.Upgrade() {
-                    None => return,
-                    Some(a) => a
-                };
                 let state = asyncSocket.SocketBufState();
-                let queue = asyncSocket.queue.clone();
                 let buf = match state {
                     SockState::TCPData(buf) => buf.clone(),
                     _ => {
                         panic!("AsyncSocketWrite get unexpected 2")
                     }
                 };
-                let (mut addr, mut len) = buf.GetAvailableWriteBuf();
-
-                while addr > 0 {
-                    let ret = unsafe {
-                        libc::write(fd, addr as _, len as _)
-                    };
-
-                    let result = if ret < 0 {
-                        Self::GetRet(ret as i64) as i32
-                    } else {
-                        ret as i32
-                    };
-
-                    if result < 0 {
-                        if result == -SysErr::EAGAIN {
-                            UpdateFDMask(fd, EVENT_OUT).unwrap();
-                            return;
-                        }
-
-                        buf.SetErr(-result);
-                        queue.Notify(EventMaskFromLinux((EVENT_ERR | READABLE_EVENT) as u32));
-                        drop(asyncSocket);
-                        break;
-                        //return true;
-                    }
-
-                    // EOF
-                    // to debug
-                    if result == 0 {
-                        buf.SetWClosed();
-                        if buf.ProduceReadBuf(0) {
-                            queue.Notify(EventMaskFromLinux(WRITEABLE_EVENT as u32));
-                        } else {
-                            queue.Notify(EventMaskFromLinux(WRITEABLE_EVENT as u32));
-                        }
-                        break;
-                    }
-
-                    let (trigger, taddr, tlen) = buf.ConsumeAndGetAvailableWriteBuf(result as usize);
-                    if trigger {
-                        queue.Notify(EventMaskFromLinux(WRITEABLE_EVENT as u32));
-                    }
-
-                    addr = taddr;
-                    len = tlen;
-                }
-
-                if buf.PendingWriteShutdown() {
-                    queue.Notify(EVENT_PENDING_SHUTDOWN);
-                }
+                asyncSocket.WriteData(&buf);
             }
             _ => panic!("AsyncSocketWrite get unexpected"),
         }

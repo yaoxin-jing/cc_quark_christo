@@ -415,7 +415,7 @@ impl UringAsyncMgr {
     }
 }
 
-impl AsyncSocketOperations {
+impl AsyncSocketInfo {
     pub fn Notify(&self, _mask: EventMask) {
         panic!("AsyncSocketOperations get notify in kernel");
     }
