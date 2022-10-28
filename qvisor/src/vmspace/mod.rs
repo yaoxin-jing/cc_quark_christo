@@ -71,6 +71,7 @@ use super::ucall::usocket::*;
 use super::*;
 use cuda_driver_sys::*;
 use std::ptr;
+use std::ffi::{c_void, CStr};
 // use libloading;
 
 const ARCH_SET_GS: u64 = 0x1001;
@@ -1594,20 +1595,25 @@ impl VMSpace {
                 ret = unsafe { cuCtxCreate_v2(&mut ctx, 0, dev) };
                 error!("cuCtxCreate_v2, ret is {:?}", ret);
 
-                let mut ptr: CUdeviceptr = 0;
-                ret = unsafe { cuMemAlloc_v2(&mut ptr, 8000) };
-                error!("cuMemAlloc_v2, ret is {:?}", ret);
+                // let mut module: CUmodule = ptr::null_mut();
+                // let filepath: &CStr = CStr::from_bytes_with_nul("/matSumKernel.ptx\0".as_bytes()).unwrap();
+                // ret = unsafe { cuModuleLoad(&mut module, filepath.as_ptr()) };
+                // error!("cuModuleLoad, ret is {:?}", ret);
 
-                let mut datain: u32 = 2500;
-                ret = unsafe { cuMemcpyHtoD_v2(ptr, &mut datain as *mut _ as *mut c_void, 4) };
-                error!("cuMemcpyHtoD_v2, ret is {:?}", ret);
+                // let mut ptr: CUdeviceptr = 0;
+                // ret = unsafe { cuMemAlloc_v2(&mut ptr, 8000) };
+                // error!("cuMemAlloc_v2, ret is {:?}", ret);
 
-                let mut dataout: u32 = 0;
-                ret = unsafe { cuMemcpyDtoH_v2(&mut dataout as *mut _ as *mut c_void, ptr, 4) };
-                error!("cuMemcpyDtoH_v2, ret is {:?}, data out is {}", ret, dataout);
+                // let mut datain: u32 = 2500;
+                // ret = unsafe { cuMemcpyHtoD_v2(ptr, &mut datain as *mut _ as *mut c_void, 4) };
+                // error!("cuMemcpyHtoD_v2, ret is {:?}", ret);
 
-                ret = unsafe { cuMemFree_v2(ptr) };
-                error!("cuMemFree, ret is {:?}", ret);
+                // let mut dataout: u32 = 0;
+                // ret = unsafe { cuMemcpyDtoH_v2(&mut dataout as *mut _ as *mut c_void, ptr, 4) };
+                // error!("cuMemcpyDtoH_v2, ret is {:?}, data out is {}", ret, dataout);
+
+                // ret = unsafe { cuMemFree_v2(ptr) };
+                // error!("cuMemFree, ret is {:?}", ret);
 
                 // let mut free: usize = 0;
                 // let mut total_mem: usize = 0;
