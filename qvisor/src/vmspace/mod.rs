@@ -69,6 +69,9 @@ use super::runc::runtime::signal_handle::*;
 use super::runc::specutils::specutils::*;
 use super::ucall::usocket::*;
 use super::*;
+use cuda_driver_sys::*;
+use std::ptr;
+// use libloading;
 
 const ARCH_SET_GS: u64 = 0x1001;
 const ARCH_SET_FS: u64 = 0x1002;
@@ -1579,12 +1582,80 @@ impl VMSpace {
                 error!("get proxy cmd1 with val1 {}", dataIn.val);
                 dataOut.val1 = 1;
                 dataOut.val2 = 2;
+
+                let mut ret: cudaError_enum = unsafe { cuInit(0) };
+                error!("cuInit, ret is {:?}", ret);
+
+                let mut dev: CUdevice = 0; 
+                ret = unsafe { cuDeviceGet(&mut dev, 0) };
+                error!("cuDeviceGet, ret is {:?}", ret);
+
+                let mut ctx: CUcontext = ptr::null_mut();
+                ret = unsafe { cuCtxCreate_v2(&mut ctx, 0, dev) };
+                error!("cuCtxCreate_v2, ret is {:?}", ret);
+
+                let mut ptr: CUdeviceptr = 0;
+                ret = unsafe { cuMemAlloc_v2(&mut ptr, 8000) };
+                error!("cuMemAlloc_v2, ret is {:?}", ret);
+
+                let mut datain: u32 = 2500;
+                ret = unsafe { cuMemcpyHtoD_v2(ptr, &mut datain as *mut _ as *mut c_void, 4) };
+                error!("cuMemcpyHtoD_v2, ret is {:?}", ret);
+
+                let mut dataout: u32 = 0;
+                ret = unsafe { cuMemcpyDtoH_v2(&mut dataout as *mut _ as *mut c_void, ptr, 4) };
+                error!("cuMemcpyDtoH_v2, ret is {:?}, data out is {}", ret, dataout);
+
+                ret = unsafe { cuMemFree_v2(ptr) };
+                error!("cuMemFree, ret is {:?}", ret);
+
+                // let mut free: usize = 0;
+                // let mut total_mem: usize = 0;
+                // ret = unsafe { cuMemGetInfo_v2(&mut free, &mut total_mem) };
+                // error!("cuMemGetInfo_v2, ret is {:?}, free {}, total {}", ret, free, total_mem);
+
+                /* START */
+                // match fs::File::open("/usr/lib/x86_64-linux-gnu/libcuda.so.515.76") {
+                //     Ok(f) => error!("file size {}", f.metadata().unwrap().len()),
+                //     Err(e) => error!("open file error {}", e),
+                // }
+                
+
+                // unsafe {
+                //     let lib = match libloading::Library::new("/usr/lib/x86_64-linux-gnu/libcuda.so.515.76") {
+                //         Ok(l) => l,
+                //         Err(e) => {
+                //             error!("Cannot load libcuda.so: {}", e);
+                //             return 0;
+                //         }
+                //     };
+
+                //     // Ok(func());
+
+                //     let cuInit: libloading::Symbol<unsafe extern fn(u32) -> u32> = match lib.get(b"cuInit") {
+                //         Ok(s) => s,    
+                //         Err(e) => {
+                //             error!("Could not load function cuInit: {}", e);
+                //             return 0;
+                //         }
+                //     };
+                
+                //     let ret = cuInit(0);
+                //     error!("cuInit, ret is {:?}", ret);
+                // }
+                /* END */
+
+                // let out = std::process::Command::new("/a.out").output().expect("failed to execut a.out");
+                // error!("a.out status: {}", out.status);
+                // error!("a.out stdout: {}", String::from_utf8_lossy(&out.stdout));
+                // error!("a.out stderr: {}", String::from_utf8_lossy(&out.stderr));
             }
             Command::Cmd2 => {}
         }
 
         return 0;
     }
+
 
     pub fn SwapInPage(addr: u64) -> i64 {
         match SHARE_SPACE.hiberMgr.SwapIn(addr) {
