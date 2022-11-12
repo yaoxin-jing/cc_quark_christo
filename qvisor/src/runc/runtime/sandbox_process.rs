@@ -30,6 +30,9 @@ use std::os::unix::io::FromRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use std::env;
+use std::os::unix::fs;
+
 use super::super::super::console::pty::*;
 use super::super::super::console::unix_socket::UnixSocket;
 use super::super::super::namespace::*;
@@ -220,19 +223,6 @@ impl SandboxProcess {
             panic!("InitRootfs: mount sandboxRootDir fails, error is {}", ret);
         }
 
-        // mount the rootfs to /var/lib/quark/<id>
-        // error!("self.Rootfs: {}, self.SandboxRootDir: {}", self.Rootfs, self.SandboxRootDir);
-        // let ret = Util::Mount(
-        //     &self.Rootfs,
-        //     &self.SandboxRootDir,
-        //     "",
-        //     rbindFlags | libc::MS_SHARED,
-        //     "",
-        // );
-        // if ret < 0 {
-        //     panic!("InitRootfs: mount rootfs to upper level fail, error is {}", ret);
-        // }
-
         // mount proc !!!
         let procPath = Join(&self.SandboxRootDir, "proc");
         match create_dir_all(&procPath) {
@@ -250,33 +240,32 @@ impl SandboxProcess {
             panic!("InitRootfs: mount proc fail, error is {}", ret);
         }
 
-        // let procPath = Join(&self.SandboxRootDir, "proc");
-        // match create_dir_all(&procPath) {
-        //     Ok(()) => (),
-        //     Err(_e) => panic!("failed to create dir to mount proc"),
-        // };
-        // let ret = Util::Mount(
-        //     "/proc",
-        //     &procPath,
-        //     "",
-        //     rbindFlags | libc::MS_SHARED,
-        //     "",
-        // );
-        // if ret < 0 {
-        //     panic!("InitRootfs: mount proc/driver fail, error is {}", ret);
-        // }
-
         /******* mount libcuda.so ********/
-        let folders = vec!["usr/lib/x86_64-linux-gnu/libcuda.so.515.76", "usr/lib/x86_64-linux-gnu/libnvidia-ml.so.515.76",
-                                      "usr/lib/x86_64-linux-gnu/libnvidia-cfg.so.515.76", "usr/lib/x86_64-linux-gnu/libnvidia-allocator.so.515.76",
-                                      "usr/lib/x86_64-linux-gnu/libnvidia-compiler.so.515.76", "usr/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.515.76",
-                                      "usr/lib/firmware/nvidia/515.76/gsp.bin", "run/nvidia-persistenced/socket",
-                                      "dev/nvidiactl", "dev/nvidia-uvm", "dev/nvidia-uvm-tools", "dev/nvidia0"];
+        // let folders = vec!["usr/lib/x86_64-linux-gnu/libcuda.so.515.76", "usr/lib/x86_64-linux-gnu/libnvidia-ml.so.515.76",
+        //                               "usr/lib/x86_64-linux-gnu/libnvidia-cfg.so.515.76", "usr/lib/x86_64-linux-gnu/libnvidia-allocator.so.515.76",
+        //                               "usr/lib/x86_64-linux-gnu/libnvidia-compiler.so.515.76", "usr/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.515.76",
+        //                               "usr/lib/firmware/nvidia/515.76/gsp.bin", "run/nvidia-persistenced/socket",
+        //                               "dev/nvidiactl", "dev/nvidia-uvm", "dev/nvidia-uvm-tools", "dev/nvidia0", "matSumKernel.ptx"];
+
+        let folders = vec!["lib/x86_64-linux-gnu/libcuda.so.515.65.01", "lib/x86_64-linux-gnu/libnvidia-ml.so.515.65.01",
+                                      "lib/x86_64-linux-gnu/libnvidia-cfg.so.515.65.01", "lib/x86_64-linux-gnu/libnvidia-allocator.so.515.65.01",
+                                      "lib/x86_64-linux-gnu/libnvidia-compiler.so.515.65.01", "lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.515.65.01",
+                                      "lib/firmware/nvidia/515.65.01/gsp.bin", "run/nvidia-persistenced/socket",
+                                      "dev/nvidiactl", "dev/nvidia-uvm", "dev/nvidia-uvm-tools", "dev/nvidia0", "matSumKernel.ptx"];
 
         for f in &folders {
+            let mut src: String;
+            src = Join("/", f);
+
+            if f.starts_with("lib") {
+                src = Join("/usr/", f);
+            }
+
+            error!("TESTHERE src: {}", src);
+            
             let dir = Dir(f);
             let tmp = Join(&self.SandboxRootDir, &dir);
-            error!("TESTHERE {}", tmp);
+            
             match create_dir_all(&tmp) {
                 Ok(()) => (),
                 Err(e) => return Err(Error::Common(format!("failed creating directory {dir} error {e}"))),
@@ -287,8 +276,7 @@ impl SandboxProcess {
                 Ok(_) => (),
                 Err(_e) => panic!("failed to create file {}", tmp),
             };
-
-            let src = Join("/", f);
+            
             let ret = Util::Mount(
                 &src,
                 &tmp,
@@ -302,6 +290,34 @@ impl SandboxProcess {
             }
         }
 
+        // create symbolic links
+        let curdir:PathBuf;
+        match env::current_dir() {
+            Ok(d) => curdir = d,
+            Err(e) => {
+                panic!("failed to get current working dir, error {}", &e.to_string());
+            }
+        }
+        let libdir = Join(&self.SandboxRootDir, "lib/x86_64-linux-gnu");
+        let libdir = Path::new(&libdir);
+        match env::set_current_dir(&libdir) {
+            Ok(()) => (),
+            Err(e) => panic!("failed to cd into lib dir, error {}", &e.to_string()),
+        }
+        match fs::symlink(&"libnvidia-ptxjitcompiler.so.515.76", &"libnvidia-ptxjitcompiler.so.1") {
+            Ok(()) => (),
+            Err(e) => panic!("failed to create symbolic link *.so.1, error {}", &e.to_string()),
+        }
+        match fs::symlink(&"libnvidia-ptxjitcompiler.so.1", &"libnvidia-ptxjitcompiler.so") {
+            Ok(()) => (),
+            Err(e) => panic!("failed to create symbolic link *.so, error {}", &e.to_string()),
+        }
+        match env::set_current_dir(&curdir) {
+            Ok(()) => (),
+            Err(e) => panic!("failed to cd back, error {}", &e.to_string()),
+        }
+        
+        // CONTINUE
         let rootContainerPath = Join(&self.SandboxRootDir, &self.containerId);
         error!("rootContainerPath: {}, SandboxRootDir: {}, Rootfs: {}", rootContainerPath, self.SandboxRootDir, self.Rootfs);
         match create_dir_all(&rootContainerPath) {
@@ -318,23 +334,6 @@ impl SandboxProcess {
         if ret < 0 {
             panic!("InitRootfs: mount rootfs fail, error is {}", ret);
         }
-
-        let proxypath = Join(&rootContainerPath, "proxy_test");
-        match File::create(&proxypath) {
-            Ok(_) => (),
-            Err(_e) => panic!("failed to create file {}", proxypath),
-        };
-        let ret = Util::Mount(
-            "/proxy_test",
-            &proxypath,
-            "",
-            rbindFlags | libc::MS_SHARED,
-            "",
-        );
-        if ret < 0 {
-            panic!("InitRootfs: mount proxy_test fail, error is {}", ret);
-        }
-
 
         return Ok(());
     }

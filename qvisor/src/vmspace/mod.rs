@@ -1580,83 +1580,87 @@ impl VMSpace {
                     &mut *(addrOut as * mut Cmd1Out)
                 };
 
-                error!("get proxy cmd1 with val1 {}", dataIn.val);
-                dataOut.val1 = 1;
-                dataOut.val2 = 2;
-
-                let mut ret: cudaError_enum = unsafe { cuInit(0) };
+                let ret: cudaError_enum = unsafe { cuInit(dataIn.val) };
                 error!("cuInit, ret is {:?}", ret);
 
+                dataOut.CUresult = ret as u32;
+            }
+            Command::Cmd2 => {
+                let dataIn = unsafe {
+                    &*(addrIn as * const Cmd2In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd2Out)
+                };
+
                 let mut dev: CUdevice = 0; 
-                ret = unsafe { cuDeviceGet(&mut dev, 0) };
+                let ret = unsafe { cuDeviceGet(&mut dev, dataIn.val) };
                 error!("cuDeviceGet, ret is {:?}", ret);
 
-                let mut ctx: CUcontext = ptr::null_mut();
-                ret = unsafe { cuCtxCreate_v2(&mut ctx, 0, dev) };
-                error!("cuCtxCreate_v2, ret is {:?}", ret);
-
-                // let mut module: CUmodule = ptr::null_mut();
-                // let filepath: &CStr = CStr::from_bytes_with_nul("/matSumKernel.ptx\0".as_bytes()).unwrap();
-                // ret = unsafe { cuModuleLoad(&mut module, filepath.as_ptr()) };
-                // error!("cuModuleLoad, ret is {:?}", ret);
-
-                // let mut ptr: CUdeviceptr = 0;
-                // ret = unsafe { cuMemAlloc_v2(&mut ptr, 8000) };
-                // error!("cuMemAlloc_v2, ret is {:?}", ret);
-
-                // let mut datain: u32 = 2500;
-                // ret = unsafe { cuMemcpyHtoD_v2(ptr, &mut datain as *mut _ as *mut c_void, 4) };
-                // error!("cuMemcpyHtoD_v2, ret is {:?}", ret);
-
-                // let mut dataout: u32 = 0;
-                // ret = unsafe { cuMemcpyDtoH_v2(&mut dataout as *mut _ as *mut c_void, ptr, 4) };
-                // error!("cuMemcpyDtoH_v2, ret is {:?}, data out is {}", ret, dataout);
-
-                // ret = unsafe { cuMemFree_v2(ptr) };
-                // error!("cuMemFree, ret is {:?}", ret);
-
-                // let mut free: usize = 0;
-                // let mut total_mem: usize = 0;
-                // ret = unsafe { cuMemGetInfo_v2(&mut free, &mut total_mem) };
-                // error!("cuMemGetInfo_v2, ret is {:?}, free {}, total {}", ret, free, total_mem);
-
-                /* START */
-                // match fs::File::open("/usr/lib/x86_64-linux-gnu/libcuda.so.515.76") {
-                //     Ok(f) => error!("file size {}", f.metadata().unwrap().len()),
-                //     Err(e) => error!("open file error {}", e),
-                // }
-                
-
-                // unsafe {
-                //     let lib = match libloading::Library::new("/usr/lib/x86_64-linux-gnu/libcuda.so.515.76") {
-                //         Ok(l) => l,
-                //         Err(e) => {
-                //             error!("Cannot load libcuda.so: {}", e);
-                //             return 0;
-                //         }
-                //     };
-
-                //     // Ok(func());
-
-                //     let cuInit: libloading::Symbol<unsafe extern fn(u32) -> u32> = match lib.get(b"cuInit") {
-                //         Ok(s) => s,    
-                //         Err(e) => {
-                //             error!("Could not load function cuInit: {}", e);
-                //             return 0;
-                //         }
-                //     };
-                
-                //     let ret = cuInit(0);
-                //     error!("cuInit, ret is {:?}", ret);
-                // }
-                /* END */
-
-                // let out = std::process::Command::new("/a.out").output().expect("failed to execut a.out");
-                // error!("a.out status: {}", out.status);
-                // error!("a.out stdout: {}", String::from_utf8_lossy(&out.stdout));
-                // error!("a.out stderr: {}", String::from_utf8_lossy(&out.stderr));
+                dataOut.dev = dev as i32;
+                dataOut.CUresult = ret as u32;
             }
-            Command::Cmd2 => {}
+            Command::Cmd3 => {
+                let dataIn = unsafe {
+                    &*(addrIn as * const Cmd3In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd3Out)
+                };
+
+                let mut ctx: CUcontext = ptr::null_mut();
+                let ret = unsafe { cuCtxCreate_v2(&mut ctx, dataIn.flags, dataIn.dev) };
+                error!("cuCtxCreate_v2, ret is {:?}, ctx is {:?}", ret, ctx);
+
+                dataOut.ctx = ctx as u64;
+                dataOut.CUresult = ret as u32;
+            }
+            Command::Cmd4 => {
+                let dataIn = unsafe {
+                    &*(addrIn as * const Cmd4In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd4Out)
+                };
+
+                let mut dptr: CUdeviceptr = 0;
+                let ret = unsafe { cuMemAlloc_v2(&mut dptr, dataIn.bytesize as usize) };
+                error!("cuMemAlloc_v2, ret is {:?}", ret);
+
+                dataOut.dptr = dptr;
+                dataOut.CUresult = ret as u32;
+            }
+            Command::Cmd5 => {
+                let dataIn = unsafe {
+                    &*(addrIn as * const Cmd5In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd1Out)
+                };
+
+                let ret = unsafe { cuMemcpyHtoD_v2(dataIn.devptr, dataIn.hostptr as *mut c_void, dataIn.bytecount as usize) };
+                error!("cuMemcpyHtoD_v2, ret is {:?}", ret);
+
+                dataOut.CUresult = ret as u32;
+            }
+            Command::Cmd6 => {
+                let dataIn = unsafe {
+                    &*(addrIn as * const Cmd5In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd1Out)
+                };
+                
+                let ret = unsafe { cuMemcpyDtoH_v2(dataIn.hostptr as *mut c_void, dataIn.devptr, dataIn.bytecount as usize) };
+                error!("cuMemcpyDtoH_v2, ret is {:?}", ret);
+
+                dataOut.CUresult = ret as u32;
+            }
         }
 
         return 0;

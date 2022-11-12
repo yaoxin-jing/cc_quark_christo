@@ -16,6 +16,7 @@ use crate::qlib::kernel::Kernel::HostSpace;
 use super::super::qlib::common::*;
 use super::super::syscalls::syscalls::*;
 use super::super::task::*;
+use alloc::vec::Vec;
 
 // arg0: command id
 // arg1: data in address
@@ -29,12 +30,74 @@ pub fn SysProxy(task: &mut Task, args: &SyscallArguments) -> Result<i64> {
     match cmd {
         Command::Cmd1 => {
             let dataIn: Cmd1In = task.CopyInObj(addrIn)?;
-            let dataOut = Cmd1Out::default();
+            let dataOut = Cmd1Out { CUresult: 0 };
             let ret = HostSpace::Proxy(commandId, &dataIn as * const _ as u64, &dataOut as * const _ as u64);
             task.CopyOutObj(&dataOut, addrOut)?;
-            return Ok(ret)
+
+            if ret < 0 {
+                return Err(Error::SysError(-ret as i32));
+            }
         }
-        Command::Cmd2 => {}
+        Command::Cmd2 => {
+            let dataIn: Cmd1In = task.CopyInObj(addrIn)?;
+            let dataOut = Cmd2Out { CUresult: 0, dev: 0 };
+            let ret = HostSpace::Proxy(commandId, &dataIn as * const _ as u64, &dataOut as * const _ as u64);
+            task.CopyOutObj(&dataOut, addrOut)?;
+
+            if ret < 0 {
+                return Err(Error::SysError(-ret as i32));
+            }
+        }
+        Command::Cmd3 => {
+            let dataIn: Cmd3In = task.CopyInObj(addrIn)?;
+            let dataOut = Cmd3Out { CUresult: 0, ctx: 0u64 };
+            let ret = HostSpace::Proxy(commandId, &dataIn as * const _ as u64, &dataOut as * const _ as u64);
+            task.CopyOutObj(&dataOut, addrOut)?;
+
+            if ret < 0 {
+                return Err(Error::SysError(-ret as i32));
+            }
+        }
+        Command::Cmd4 => {
+            let dataIn: Cmd4In = task.CopyInObj(addrIn)?;
+            let dataOut = Cmd4Out { CUresult: 0, dptr: 0u64 };
+            let ret = HostSpace::Proxy(commandId, &dataIn as * const _ as u64, &dataOut as * const _ as u64);
+            task.CopyOutObj(&dataOut, addrOut)?;
+
+            if ret < 0 {
+                return Err(Error::SysError(-ret as i32));
+            }
+        }
+        Command::Cmd5 => {
+            let mut dataIn: Cmd5In = task.CopyInObj(addrIn)?;
+            let dataOut = Cmd1Out { CUresult: 0 };
+
+            let buffer: Vec<u8> = task.CopyInVec(dataIn.hostptr, dataIn.bytecount as usize)?;
+            dataIn.hostptr = &buffer[0] as *const _ as u64;
+
+            let ret = HostSpace::Proxy(commandId, &dataIn as * const _ as u64, &dataOut as * const _ as u64);
+            task.CopyOutObj(&dataOut, addrOut)?;
+
+            if ret < 0 {
+                return Err(Error::SysError(-ret as i32));
+            }
+        }
+        Command::Cmd6 => {
+            let mut dataIn: Cmd5In = task.CopyInObj(addrIn)?;
+            let dataOut = Cmd1Out { CUresult: 0 };
+
+            let buffer = vec![0u8; dataIn.bytecount as usize];
+            let hostptr = dataIn.hostptr;
+            dataIn.hostptr = &buffer[0] as *const _ as u64;
+
+            let ret = HostSpace::Proxy(commandId, &dataIn as * const _ as u64, &dataOut as * const _ as u64);
+            task.CopyOutSlice(&buffer, hostptr, dataIn.bytecount as usize)?;
+            task.CopyOutObj(&dataOut, addrOut)?;
+
+            if ret < 0 {
+                return Err(Error::SysError(-ret as i32));
+            }
+        }
     }
 
     return Ok(0)

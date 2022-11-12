@@ -14,21 +14,70 @@
 #[derive(Debug, Copy, Clone, PartialEq)]
 #[repr(u64)]
 pub enum Command {
-    Cmd1 = 1 as u64,
-    Cmd2,
+    Cmd1 = 1 as u64, // cuInit
+    Cmd2, // cuDeviceGet
+    Cmd3, // cuCtxCreate_v2
+    Cmd4, // cuMemAlloc_v2
+    Cmd5, // cuMemcpyHtoD_v2
+    Cmd6, // cuMemcpyDtoH_v2
 }
 
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct Cmd1In {
-    pub val: u64,
+    pub val: u32,
 }
 
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
 pub struct Cmd1Out {
-    pub val1: u64,
-    pub val2: u64,
+    pub CUresult: u32,
 }
 
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct Cmd2In {
+    pub val: i32,
+}
 
+#[derive(Default, Copy, Clone)]
+#[repr(C)]
+pub struct Cmd2Out {
+    pub CUresult: u32,
+    pub dev: i32,
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct Cmd3In {
+    pub flags: u32,
+    pub dev: i32,
+}
+
+#[derive(Default, Copy, Clone)]
+#[repr(C)]
+pub struct Cmd3Out {
+    pub CUresult: u32,
+    pub ctx: u64,
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct Cmd4In {
+    pub bytesize: u64,
+}
+
+#[derive(Default, Copy, Clone)]
+#[repr(C)]
+pub struct Cmd4Out {
+    pub CUresult: u32,
+    pub dptr: u64,
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct Cmd5In {
+    pub devptr: u64,
+    pub hostptr: u64,
+    pub bytecount: u64,
+}
