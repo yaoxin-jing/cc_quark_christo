@@ -1614,7 +1614,7 @@ impl VMSpace {
                 let ret = unsafe { cuCtxCreate_v2(&mut ctx, dataIn.flags, dataIn.dev) };
                 error!("cuCtxCreate_v2, ret is {:?}, ctx is {:?}", ret, ctx);
 
-                dataOut.ctx = ctx as u64;
+                dataOut.val = ctx as u64;
                 dataOut.CUresult = ret as u32;
             }
             Command::Cmd4 => {
@@ -1627,11 +1627,11 @@ impl VMSpace {
                 };
 
                 let mut dptr: CUdeviceptr = 0;
-                let ret = unsafe { cuMemAlloc_v2(&mut dptr, dataIn.bytesize as usize) };
+                let ret = unsafe { cuMemAlloc_v2(&mut dptr, dataIn.val as usize) };
                 error!("cuMemAlloc_v2, ret is {:?}", ret);
 
-                dataOut.dptr = dptr;
-                dataOut.CUresult = ret as u32;
+                dataOut.val_u64 = dptr;
+                dataOut.val_u32 = ret as u32;
             }
             Command::Cmd5 => {
                 let dataIn = unsafe {
@@ -1660,6 +1660,74 @@ impl VMSpace {
                 error!("cuMemcpyDtoH_v2, ret is {:?}", ret);
 
                 dataOut.CUresult = ret as u32;
+            }
+            Command::Cmd7 => {
+                let dataIn = unsafe {
+                    &*(addrIn as * const Cmd7In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd3Out)
+                };
+
+                let mut module: CUmodule = ptr::null_mut();
+                let ret = unsafe { cuModuleLoad(&mut module, dataIn.ptr as *const ::std::os::raw::c_char) };
+                error!("cuModuleLoad, ret is {:?}", ret);
+
+                dataOut.val = module as u64;
+                dataOut.CUresult = ret as u32;
+            }
+            Command::Cmd8 => {
+                let dataIn = unsafe {
+                    &*(addrIn as * const Cmd5In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd3Out)
+                };
+
+                let mut function: CUfunction = ptr::null_mut();
+                let ret = unsafe { 
+                    cuModuleGetFunction(&mut function, dataIn.devptr as CUmodule, dataIn.hostptr as *const ::std::os::raw::c_char) 
+                };
+                error!("cuModuleGetFunction, ret is {:?}", ret);
+
+                dataOut.val = function as u64;
+                dataOut.CUresult = ret as u32;
+            }
+            Command::Cmd9 => {
+                let mut dataIn = unsafe {
+                    &mut *(addrIn as * mut Cmd9In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd1Out)
+                };
+
+                dataIn.numParams = unsafe {
+                    *((dataIn.func + 0x2ac as u64) as * const u32)
+                };
+
+                let addr = unsafe {
+                    *((dataIn.func + 0x2a0 as u64) as * const u64)
+                };
+                error!("cmd9, numParams is {}, addr is 0x{:x}", dataIn.numParams, addr);
+
+                let  a0 = unsafe {*((addr + 0x0 as u64) as * const u32)};
+                let  a1 = unsafe {*((addr + 0x4 as u64) as * const u32)};
+                let  a2 = unsafe {*((addr + 0x8 as u64) as * const u32)};
+                let  a3 = unsafe {*((addr + 0xc as u64) as * const u32)};
+                error!("a = {}, {}, {}, {}", a0, a1, a2, a3);
+
+                let offsets = unsafe {
+                    &mut *(dataIn.ptr as * mut [u32;32])
+                };
+
+                offsets[0] = a0;
+                offsets[1] = a1;
+                offsets[2] = a2;
+
+                dataOut.CUresult = 0u32;
             }
         }
 

@@ -20,6 +20,9 @@ pub enum Command {
     Cmd4, // cuMemAlloc_v2
     Cmd5, // cuMemcpyHtoD_v2
     Cmd6, // cuMemcpyDtoH_v2
+    Cmd7, // cuModuleLoad
+    Cmd8, // cuModuleGetFunction
+    Cmd9, // get CUfunction parameter list
 }
 
 #[derive(Copy, Clone)]
@@ -58,20 +61,20 @@ pub struct Cmd3In {
 #[repr(C)]
 pub struct Cmd3Out {
     pub CUresult: u32,
-    pub ctx: u64,
+    pub val: u64,
 }
 
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct Cmd4In {
-    pub bytesize: u64,
+    pub val: u64,
 }
 
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
 pub struct Cmd4Out {
-    pub CUresult: u32,
-    pub dptr: u64,
+    pub val_u32: u32,
+    pub val_u64: u64,
 }
 
 #[derive(Copy, Clone)]
@@ -80,4 +83,35 @@ pub struct Cmd5In {
     pub devptr: u64,
     pub hostptr: u64,
     pub bytecount: u64,
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct Cmd7In {
+    pub ptr: u64,
+    pub length: u64,
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct Cmd9In {
+    pub func: u64,
+    pub ptr: u64,
+    pub numParams: u32,
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct Cmd10In {
+    pub func: u64,
+    pub stream: u64,
+    pub params: u64,
+    pub extra: u64,
+    pub gridDimX: u32,
+    pub gridDimY: u32,
+    pub gridDimZ: u32,
+    pub blockDimX: u32,
+    pub blockDimY: u32,
+    pub blockDimZ: u32,
+    pub sharedMemBytes: u32,
 }

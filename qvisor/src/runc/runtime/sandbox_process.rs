@@ -304,7 +304,7 @@ impl SandboxProcess {
             Ok(()) => (),
             Err(e) => panic!("failed to cd into lib dir, error {}", &e.to_string()),
         }
-        match fs::symlink(&"libnvidia-ptxjitcompiler.so.515.76", &"libnvidia-ptxjitcompiler.so.1") {
+        match fs::symlink(&"libnvidia-ptxjitcompiler.so.515.65.01", &"libnvidia-ptxjitcompiler.so.1") {
             Ok(()) => (),
             Err(e) => panic!("failed to create symbolic link *.so.1, error {}", &e.to_string()),
         }
