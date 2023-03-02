@@ -22,7 +22,26 @@ pub enum Command {
     Cmd6, // cuMemcpyDtoH_v2
     Cmd7, // cuModuleLoad
     Cmd8, // cuModuleGetFunction
-    Cmd9, // get CUfunction parameter list
+    Cmd9, // get CUfunction parameter sizes
+    Cmd10, // cuLaunchKernel
+    Cmd11, // cuMemFree_v2
+    Cmd12, // cuDriverGetVersion
+    Cmd13, // cuDeviceGetCount
+    Cmd14, // hidden_0_1
+    Cmd15, // cuDeviceGetName
+    Cmd16, // cuDeviceTotalMem_v2
+    Cmd17, // cuDeviceGetAttribute
+    Cmd18, // cuDeviceGetUuid
+    Cmd19, // cuCtxGetDevice
+    Cmd20, // cuCtxSetCurrent
+    Cmd21, // cuCtxGetCurrent
+    Cmd22, // hidden_0_6
+    Cmd23, // hidden_3_2
+    Cmd24, // cuDevicePrimaryCtxRetain
+    Cmd25, // hidden_3_0
+    Cmd26, // hidden_0_5
+    Cmd27, // cudaMalloc
+    Cmd28, // __cudaRegisterFatBinary
 }
 
 #[derive(Copy, Clone)]
@@ -34,7 +53,7 @@ pub struct Cmd1In {
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
 pub struct Cmd1Out {
-    pub CUresult: u32,
+    pub val: u32,
 }
 
 #[derive(Copy, Clone)]
@@ -46,8 +65,8 @@ pub struct Cmd2In {
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
 pub struct Cmd2Out {
-    pub CUresult: u32,
-    pub dev: i32,
+    pub val_u32: u32,
+    pub val_i32: i32,
 }
 
 #[derive(Copy, Clone)]
@@ -92,12 +111,13 @@ pub struct Cmd7In {
     pub length: u64,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Default, Copy, Clone)]
 #[repr(C)]
-pub struct Cmd9In {
+pub struct Cmd9InOut {
     pub func: u64,
     pub ptr: u64,
     pub numParams: u32,
+    pub totalParamSize: u32,
 }
 
 #[derive(Copy, Clone)]
@@ -107,6 +127,9 @@ pub struct Cmd10In {
     pub stream: u64,
     pub params: u64,
     pub extra: u64,
+    pub offsets: u64,
+    pub numParams: u32,
+    pub totalParamSize: u32,
     pub gridDimX: u32,
     pub gridDimY: u32,
     pub gridDimZ: u32,
@@ -114,4 +137,67 @@ pub struct Cmd10In {
     pub blockDimY: u32,
     pub blockDimZ: u32,
     pub sharedMemBytes: u32,
+}
+
+#[derive(Default, Copy, Clone)]
+#[repr(C)]
+pub struct Cmd15In {
+    pub buf: u64,
+    pub len: u32,
+    pub dev: u32,
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct Cmd17In {
+    pub attrib: u32,
+    pub dev: i32,
+}
+
+#[derive(Default, Copy, Clone)]
+#[repr(C)]
+pub struct Cmd18In {
+    pub val_u64: u64,
+    pub val_u32: u32,
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct Cmd25In {
+    pub val_u64: u64,
+    pub val_u32: u32,
+    pub val_i32: i32,
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct Cmd26In {
+    pub val1_u64: u64,
+    pub val2_u64: u64,
+    pub val3_u64: u64,
+    pub val4_i32: i32,
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct Cmd28In {
+    pub val1_u32: u32,
+    pub val2_u32: u32,
+    pub val3_u64: u64,
+    pub val4_u64: u64,
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct FatbinHeader {
+    pub val1_u32: u32,
+    pub val2_u16: u16,
+    pub val3_u16: u16,
+    pub val4_u64: u64,
+}
+
+#[derive(Default, Copy, Clone)]
+#[repr(C)]
+pub struct Cmd28Out {
+    pub val: u64,
 }

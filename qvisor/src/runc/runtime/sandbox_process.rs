@@ -247,11 +247,12 @@ impl SandboxProcess {
         //                               "usr/lib/firmware/nvidia/515.76/gsp.bin", "run/nvidia-persistenced/socket",
         //                               "dev/nvidiactl", "dev/nvidia-uvm", "dev/nvidia-uvm-tools", "dev/nvidia0", "matSumKernel.ptx"];
 
-        let folders = vec!["lib/x86_64-linux-gnu/libcuda.so.515.65.01", "lib/x86_64-linux-gnu/libnvidia-ml.so.515.65.01",
-                                      "lib/x86_64-linux-gnu/libnvidia-cfg.so.515.65.01", "lib/x86_64-linux-gnu/libnvidia-allocator.so.515.65.01",
-                                      "lib/x86_64-linux-gnu/libnvidia-compiler.so.515.65.01", "lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.515.65.01",
-                                      "lib/firmware/nvidia/515.65.01/gsp.bin", "run/nvidia-persistenced/socket",
-                                      "dev/nvidiactl", "dev/nvidia-uvm", "dev/nvidia-uvm-tools", "dev/nvidia0", "matSumKernel.ptx"];
+        let folders = vec!["lib/x86_64-linux-gnu/libcuda.so.525.60.13", "lib/x86_64-linux-gnu/libnvidia-ml.so.525.60.13",
+                                      "lib/x86_64-linux-gnu/libnvidia-cfg.so.525.60.13", "lib/x86_64-linux-gnu/libnvidia-allocator.so.525.60.13",
+                                      "lib/x86_64-linux-gnu/libnvidia-compiler.so.525.60.13", "lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.525.60.13",
+                                      "lib/firmware/nvidia/525.60.13/gsp_ad10x.bin","lib/firmware/nvidia/525.60.13/gsp_tu10x.bin", "run/nvidia-persistenced/socket",
+                                      "dev/nvidiactl", "dev/nvidia-uvm", "dev/nvidia-uvm-tools", "dev/nvidia0", "matSumKernel.ptx",
+                                      "usr/local/cuda/targets/x86_64-linux/lib/libcudart.so.11.3.109"];
 
         for f in &folders {
             let mut src: String;
@@ -286,7 +287,7 @@ impl SandboxProcess {
             );
             
             if ret < 0 {
-                panic!("InitRootfs: mount libcuda.so fail, error is {}", ret);
+                panic!("InitRootfs: mount libcuda.so fail, error is {}, src: {}, target:{}", ret, src, tmp);
             }
         }
 
@@ -298,13 +299,14 @@ impl SandboxProcess {
                 panic!("failed to get current working dir, error {}", &e.to_string());
             }
         }
+        // lib/x86_64-linux-gnu
         let libdir = Join(&self.SandboxRootDir, "lib/x86_64-linux-gnu");
         let libdir = Path::new(&libdir);
         match env::set_current_dir(&libdir) {
             Ok(()) => (),
             Err(e) => panic!("failed to cd into lib dir, error {}", &e.to_string()),
         }
-        match fs::symlink(&"libnvidia-ptxjitcompiler.so.515.65.01", &"libnvidia-ptxjitcompiler.so.1") {
+        match fs::symlink(&"libnvidia-ptxjitcompiler.so.525.60.13", &"libnvidia-ptxjitcompiler.so.1") {
             Ok(()) => (),
             Err(e) => panic!("failed to create symbolic link *.so.1, error {}", &e.to_string()),
         }
@@ -312,6 +314,20 @@ impl SandboxProcess {
             Ok(()) => (),
             Err(e) => panic!("failed to create symbolic link *.so, error {}", &e.to_string()),
         }
+
+        // usr/local/cuda/targets/x86_64-linux/lib
+        let libdir = Join(&self.SandboxRootDir, "usr/local/cuda/targets/x86_64-linux/lib");
+        let libdir = Path::new(&libdir);
+        match env::set_current_dir(&libdir) {
+            Ok(()) => (),
+            Err(e) => panic!("failed to cd into lib dir, error {}", &e.to_string()),
+        }
+        match fs::symlink(&"libcudart.so.11.3.109", &"libcudart.so.11.0") {
+            Ok(()) => (),
+            Err(e) => panic!("failed to create symbolic link *.so.1, error {}", &e.to_string()),
+        }
+
+        // return to saved dir
         match env::set_current_dir(&curdir) {
             Ok(()) => (),
             Err(e) => panic!("failed to cd back, error {}", &e.to_string()),

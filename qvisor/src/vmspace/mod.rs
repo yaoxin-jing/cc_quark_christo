@@ -70,8 +70,9 @@ use super::runc::specutils::specutils::*;
 use super::ucall::usocket::*;
 use super::*;
 use cuda_driver_sys::*;
+use cuda_runtime_sys::*;
 use std::ptr;
-use std::ffi::{c_void, CStr};
+use std::ffi::{c_void};
 // use libloading;
 
 const ARCH_SET_GS: u64 = 0x1001;
@@ -1567,6 +1568,119 @@ impl VMSpace {
         }
     }
 
+    pub fn u32_to_CUdevice_attribute(val: u32) -> CUdevice_attribute {
+        let attrib: CUdevice_attribute = match val {
+            1 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK,
+            2 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X,
+            3 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Y,
+            4 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Z,
+            5 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_X,
+            6 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Y,
+            7 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Z,
+            8 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK,
+            9 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_TOTAL_CONSTANT_MEMORY,
+            10 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_WARP_SIZE,
+            11 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAX_PITCH,
+            12 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAX_REGISTERS_PER_BLOCK,
+            13 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_CLOCK_RATE,
+            14 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_TEXTURE_ALIGNMENT,
+            15 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_GPU_OVERLAP,
+            16 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT,
+            17 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_KERNEL_EXEC_TIMEOUT,
+            18 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_INTEGRATED,
+            19 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_CAN_MAP_HOST_MEMORY,
+            20 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_COMPUTE_MODE,
+            21 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE1D_WIDTH,
+            22 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE2D_WIDTH,
+            23 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE2D_HEIGHT,
+            24 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE3D_WIDTH,
+            25 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE3D_HEIGHT,
+            26 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE3D_DEPTH,
+            27 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE2D_LAYERED_WIDTH,
+            28 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE2D_LAYERED_HEIGHT,
+            29 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE2D_LAYERED_LAYERS,
+            30 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_SURFACE_ALIGNMENT,
+            31 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_CONCURRENT_KERNELS,
+            32 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_ECC_ENABLED,
+            33 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_PCI_BUS_ID,
+            34 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_PCI_DEVICE_ID,
+            35 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_TCC_DRIVER,
+            36 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MEMORY_CLOCK_RATE,
+            37 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_GLOBAL_MEMORY_BUS_WIDTH,
+            38 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_L2_CACHE_SIZE,
+            39 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_MULTIPROCESSOR,
+            40 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_ASYNC_ENGINE_COUNT,
+            41 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_UNIFIED_ADDRESSING,
+            42 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE1D_LAYERED_WIDTH,
+            43 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE1D_LAYERED_LAYERS,
+            44 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_CAN_TEX2D_GATHER,
+            45 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE2D_GATHER_WIDTH,
+            46 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE2D_GATHER_HEIGHT,
+            47 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE3D_WIDTH_ALTERNATE,
+            48 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE3D_HEIGHT_ALTERNATE,
+            49 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE3D_DEPTH_ALTERNATE,
+            50 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_PCI_DOMAIN_ID,
+            51 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_TEXTURE_PITCH_ALIGNMENT,
+            52 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURECUBEMAP_WIDTH,
+            53 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURECUBEMAP_LAYERED_WIDTH,
+            54 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURECUBEMAP_LAYERED_LAYERS,
+            55 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_SURFACE1D_WIDTH,
+            56 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_SURFACE2D_WIDTH,
+            57 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_SURFACE2D_HEIGHT,
+            58 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_SURFACE3D_WIDTH,
+            59 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_SURFACE3D_HEIGHT,
+            60 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_SURFACE3D_DEPTH,
+            61 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_SURFACE1D_LAYERED_WIDTH,
+            62 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_SURFACE1D_LAYERED_LAYERS,
+            63 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_SURFACE2D_LAYERED_WIDTH,
+            64 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_SURFACE2D_LAYERED_HEIGHT,
+            65 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_SURFACE2D_LAYERED_LAYERS,
+            66 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_SURFACECUBEMAP_WIDTH,
+            67 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_SURFACECUBEMAP_LAYERED_WIDTH,
+            68 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_SURFACECUBEMAP_LAYERED_LAYERS,
+            69 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE1D_LINEAR_WIDTH,
+            70 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE2D_LINEAR_WIDTH,
+            71 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE2D_LINEAR_HEIGHT,
+            72 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE2D_LINEAR_PITCH,
+            73 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE2D_MIPMAPPED_WIDTH,
+            74 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE2D_MIPMAPPED_HEIGHT,
+            75 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR,
+            76 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR,
+            77 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAXIMUM_TEXTURE1D_MIPMAPPED_WIDTH,
+            78 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_STREAM_PRIORITIES_SUPPORTED,
+            79 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_GLOBAL_L1_CACHE_SUPPORTED,
+            80 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_LOCAL_L1_CACHE_SUPPORTED,
+            81 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR,
+            82 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAX_REGISTERS_PER_MULTIPROCESSOR,
+            83 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MANAGED_MEMORY,
+            84 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MULTI_GPU_BOARD,
+            85 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MULTI_GPU_BOARD_GROUP_ID,
+            86 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_HOST_NATIVE_ATOMIC_SUPPORTED,
+            87 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_SINGLE_TO_DOUBLE_PRECISION_PERF_RATIO,
+            88 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS,
+            89 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_CONCURRENT_MANAGED_ACCESS,
+            90 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_COMPUTE_PREEMPTION_SUPPORTED,
+            91 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_CAN_USE_HOST_POINTER_FOR_REGISTERED_MEM,
+            92 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_CAN_USE_STREAM_MEM_OPS,
+            93 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_CAN_USE_64_BIT_STREAM_MEM_OPS,
+            94 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_CAN_USE_STREAM_WAIT_VALUE_NOR,
+            95 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_COOPERATIVE_LAUNCH,
+            96 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_COOPERATIVE_MULTI_DEVICE_LAUNCH,
+            97 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
+            98 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_CAN_FLUSH_REMOTE_WRITES,
+            99 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_HOST_REGISTER_SUPPORTED,
+            100 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES,
+            101 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_DIRECT_MANAGED_MEM_ACCESS_FROM_HOST,
+            102 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_VIRTUAL_ADDRESS_MANAGEMENT_SUPPORTED,
+            103 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR_SUPPORTED,
+            104 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_WIN32_HANDLE_SUPPORTED,
+            105 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_WIN32_KMT_HANDLE_SUPPORTED,
+            106 => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAX,
+            _ => CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MAX,
+        };
+        return attrib;
+    }
+
     pub fn Proxy(cmd: u64, addrIn: u64, addrOut: u64) -> i64 {
         use super::qlib::proxy::*;
         let cmd : Command = unsafe { core::mem::transmute(cmd as u64) };
@@ -1583,7 +1697,7 @@ impl VMSpace {
                 let ret: cudaError_enum = unsafe { cuInit(dataIn.val) };
                 error!("cuInit, ret is {:?}", ret);
 
-                dataOut.CUresult = ret as u32;
+                dataOut.val = ret as u32;
             }
             Command::Cmd2 => {
                 let dataIn = unsafe {
@@ -1598,8 +1712,8 @@ impl VMSpace {
                 let ret = unsafe { cuDeviceGet(&mut dev, dataIn.val) };
                 error!("cuDeviceGet, ret is {:?}", ret);
 
-                dataOut.dev = dev as i32;
-                dataOut.CUresult = ret as u32;
+                dataOut.val_i32 = dev as i32;
+                dataOut.val_u32 = ret as u32;
             }
             Command::Cmd3 => {
                 let dataIn = unsafe {
@@ -1628,7 +1742,7 @@ impl VMSpace {
 
                 let mut dptr: CUdeviceptr = 0;
                 let ret = unsafe { cuMemAlloc_v2(&mut dptr, dataIn.val as usize) };
-                error!("cuMemAlloc_v2, ret is {:?}", ret);
+                error!("cuMemAlloc_v2, ret is {:?}, devptr={:x}", ret, dptr);
 
                 dataOut.val_u64 = dptr;
                 dataOut.val_u32 = ret as u32;
@@ -1645,7 +1759,7 @@ impl VMSpace {
                 let ret = unsafe { cuMemcpyHtoD_v2(dataIn.devptr, dataIn.hostptr as *mut c_void, dataIn.bytecount as usize) };
                 error!("cuMemcpyHtoD_v2, ret is {:?}", ret);
 
-                dataOut.CUresult = ret as u32;
+                dataOut.val = ret as u32;
             }
             Command::Cmd6 => {
                 let dataIn = unsafe {
@@ -1659,7 +1773,7 @@ impl VMSpace {
                 let ret = unsafe { cuMemcpyDtoH_v2(dataIn.hostptr as *mut c_void, dataIn.devptr, dataIn.bytecount as usize) };
                 error!("cuMemcpyDtoH_v2, ret is {:?}", ret);
 
-                dataOut.CUresult = ret as u32;
+                dataOut.val = ret as u32;
             }
             Command::Cmd7 => {
                 let dataIn = unsafe {
@@ -1690,18 +1804,22 @@ impl VMSpace {
                 let ret = unsafe { 
                     cuModuleGetFunction(&mut function, dataIn.devptr as CUmodule, dataIn.hostptr as *const ::std::os::raw::c_char) 
                 };
-                error!("cuModuleGetFunction, ret is {:?}", ret);
+                error!("cuModuleGetFunction, ret is {:?}, CUfunction={:x}", ret, function as u64);
 
                 dataOut.val = function as u64;
                 dataOut.CUresult = ret as u32;
             }
             Command::Cmd9 => {
                 let mut dataIn = unsafe {
-                    &mut *(addrIn as * mut Cmd9In)
+                    &mut *(addrIn as * mut Cmd9InOut)
                 };
 
                 let dataOut = unsafe {
                     &mut *(addrOut as * mut Cmd1Out)
+                };
+
+                dataIn.totalParamSize = unsafe {
+                    *((dataIn.func + 0x278 as u64) as * const u32)
                 };
 
                 dataIn.numParams = unsafe {
@@ -1711,23 +1829,501 @@ impl VMSpace {
                 let addr = unsafe {
                     *((dataIn.func + 0x2a0 as u64) as * const u64)
                 };
-                error!("cmd9, numParams is {}, addr is 0x{:x}", dataIn.numParams, addr);
-
-                let  a0 = unsafe {*((addr + 0x0 as u64) as * const u32)};
-                let  a1 = unsafe {*((addr + 0x4 as u64) as * const u32)};
-                let  a2 = unsafe {*((addr + 0x8 as u64) as * const u32)};
-                let  a3 = unsafe {*((addr + 0xc as u64) as * const u32)};
-                error!("a = {}, {}, {}, {}", a0, a1, a2, a3);
 
                 let offsets = unsafe {
                     &mut *(dataIn.ptr as * mut [u32;32])
                 };
 
-                offsets[0] = a0;
-                offsets[1] = a1;
-                offsets[2] = a2;
+                for i in 0..dataIn.numParams {
+                    let val = unsafe {*((addr + (4*i) as u64) as * const u32)};
+                    offsets[i as usize] = val;
+                }
 
-                dataOut.CUresult = 0u32;
+                dataOut.val = 0u32;
+            }
+            Command::Cmd10 => {
+                let dataIn = unsafe {
+                    &*(addrIn as * const Cmd10In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd1Out)
+                };
+
+                let ret = unsafe { 
+                    cuLaunchKernel(
+                        dataIn.func as CUfunction, 
+                        dataIn.gridDimX,
+                        dataIn.gridDimY,
+                        dataIn.gridDimZ,
+                        dataIn.blockDimX,
+                        dataIn.blockDimY,
+                        dataIn.blockDimZ,
+                        dataIn.sharedMemBytes,
+                        dataIn.stream as CUstream,
+                        dataIn.params as *mut *mut libc::c_void,
+                        dataIn.extra as *mut *mut libc::c_void
+                    )
+                };
+                error!("cuLaunchKernel, ret is {:?}", ret);
+
+                dataOut.val = ret as u32;          
+            }
+            Command::Cmd11 => {
+                let dataIn = unsafe {
+                    &*(addrIn as * const Cmd4In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd1Out)
+                };
+
+                let ret: cudaError_enum = unsafe { cuMemFree_v2(dataIn.val) };
+                error!("cuMemFree_v2, ret is {:?}", ret);
+
+                dataOut.val = ret as u32;
+            }
+            Command::Cmd12 => {
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd2Out)
+                };
+
+                let mut version: i32 = 0; 
+                let ret = unsafe { cuDriverGetVersion(&mut version) };
+                error!("cuDriverGetVersion, ret is {:?}", ret);
+
+                dataOut.val_i32 = version;
+                dataOut.val_u32 = ret as u32;
+            }
+            Command::Cmd13 => {
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd2Out)
+                };
+
+                let mut count: i32 = 0; 
+                let ret = unsafe { cuDeviceGetCount(&mut count) };
+                error!("cuDeviceGetCount, ret is {:?}", ret);
+
+                dataOut.val_i32 = count;
+                dataOut.val_u32 = ret as u32;
+            }
+            Command::Cmd14 => {
+                let dataIn = unsafe {
+                    &*(addrIn as * const Cmd3In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd3Out)
+                };
+
+                let mut pExportTable: *const ::std::os::raw::c_void = ptr::null_mut();
+
+                const TABLE0ID: CUuuid = CUuuid {
+                    bytes: [
+                        0x6b, -43i8, -5i8, 0x6c, 0x5b, -12i8, -25i8, 0x4a, -119i8, 
+                        -121i8, -39i8, 0x39, 0x12, -3i8, -99i8, -7i8,
+                    ],
+                };
+
+                let ret = unsafe { cuGetExportTable(&mut pExportTable as *mut *const ::std::os::raw::c_void, &TABLE0ID) };
+                error!("cuGetExportTable, ret is {:?}, pExportTable={:?}", ret, pExportTable);
+
+                let addr: u64 = unsafe {
+                    *((pExportTable as *const u64).offset(2))
+                };
+
+                error!("pExportTable[2]=0x{:x}", addr);
+
+                let funcptr = addr as *const ();
+                let code: extern "C" fn(*mut CUcontext, CUdevice) -> CUresult = unsafe { std::mem::transmute(funcptr) };
+                let mut ctx: CUcontext = ptr::null_mut();
+                let ret = (code)(&mut ctx, dataIn.dev);
+                error!("hidden_0_1, ret is {:?}, ctx is {:?}", ret, ctx);
+
+                dataOut.val = ctx as u64;
+                dataOut.CUresult = ret as u32;
+            }
+            Command::Cmd15 => {
+                let dataIn = unsafe {
+                    &mut *(addrIn as * mut Cmd15In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd1Out)
+                };
+
+                let ret = unsafe {
+                    cuDeviceGetName(
+                        dataIn.buf as *mut ::std::os::raw::c_char,
+                        dataIn.len as ::std::os::raw::c_int,
+                        dataIn.dev as CUdevice
+                    )
+                };
+
+                error!("cuDeviceGetName, ret is {:?}", ret);
+                dataOut.val = ret as u32;
+            }
+            Command::Cmd16 => {
+                let dataIn = unsafe {
+                    &mut *(addrIn as * mut Cmd2In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd4Out)
+                };
+
+                let mut totalMem: usize = 0;
+                let ret = unsafe {
+                    cuDeviceTotalMem_v2(
+                        &mut totalMem,
+                        dataIn.val,
+                    )
+                };
+
+                dataOut.val_u32 = ret as u32;
+                dataOut.val_u64 = totalMem as u64;
+            }
+            Command::Cmd17 => {
+                let dataIn = unsafe {
+                    &mut *(addrIn as * mut Cmd3In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd2Out)
+                };
+
+                let mut i: i32 = 0;
+                let attrib: CUdevice_attribute = Self::u32_to_CUdevice_attribute(dataIn.flags);
+
+                let ret = unsafe {
+                    cuDeviceGetAttribute(
+                        &mut i as *mut ::std::os::raw::c_int,
+                        attrib,
+                        dataIn.dev,
+                    )
+                };
+
+                dataOut.val_u32 = ret as u32;
+                dataOut.val_i32 = i;
+            }
+            Command::Cmd18 => {
+                let dataIn = unsafe {
+                    &mut *(addrIn as * mut Cmd18In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd1Out)
+                };
+
+                let buffer: &mut [::std::os::raw::c_char; 16] = unsafe {
+                    &mut *(dataIn.val_u64 as *mut [::std::os::raw::c_char; 16])
+                };
+
+                let mut id: CUuuid = CUuuid { bytes: [0; 16] }; 
+                let ret = unsafe {
+                    cuDeviceGetUuid(
+                        &mut id as *mut CUuuid,
+                        dataIn.val_u32 as CUdevice
+                    )
+                };
+                error!("cuDeviceGetUuid, ret is {:?}", ret);
+
+                buffer[..16].clone_from_slice(&id.bytes);
+                dataOut.val = ret as u32;
+            }
+            Command::Cmd19 => {
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd2Out)
+                };
+
+                let mut dev: CUdevice = 0; 
+                let ret = unsafe { cuCtxGetDevice(&mut dev) };
+                error!("cuCtxGetDevice, ret is {:?}", ret);
+
+                dataOut.val_i32 = dev as i32;
+                dataOut.val_u32 = ret as u32;
+            }
+            Command::Cmd20 => {
+                let dataIn = unsafe {
+                    &*(addrIn as * const Cmd4In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd1Out)
+                };
+
+                let ret = unsafe { cuCtxSetCurrent(dataIn.val as CUcontext) };
+                error!("cuCtxSetCurrent, ret is {:?}", ret);
+
+                dataOut.val = ret as u32;
+            }
+            Command::Cmd21 => {
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd4Out)
+                };
+
+                let mut ctx: CUcontext = ptr::null_mut();
+                let ret = unsafe { cuCtxGetCurrent(&mut ctx) };
+                error!("cuCtxGetCurrent, ret is {:?}", ret);
+
+                dataOut.val_u64 = ctx as u64;
+                dataOut.val_u32 = ret as u32;
+            }
+            Command::Cmd22 => {
+                let dataIn = unsafe {
+                    &*(addrIn as * const Cmd4In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd1Out)
+                };
+
+                let mut pExportTable: *const ::std::os::raw::c_void = ptr::null_mut();
+
+                const TABLE0ID: CUuuid = CUuuid {
+                    bytes: [
+                        0x6b, -43i8, -5i8, 0x6c, 0x5b, -12i8, -25i8, 0x4a, -119i8, 
+                        -121i8, -39i8, 0x39, 0x12, -3i8, -99i8, -7i8,
+                    ],
+                };
+
+                let ret = unsafe { cuGetExportTable(&mut pExportTable as *mut *const ::std::os::raw::c_void, &TABLE0ID) };
+                error!("cuGetExportTable, ret is {:?}, pExportTable={:?}", ret, pExportTable);
+
+                let addr: u64 = unsafe {
+                    *((pExportTable as *const u64).offset(7))
+                };
+
+                error!("pExportTable[7]=0x{:x}", addr);
+
+                let funcptr = addr as *const ();
+                let code: extern "C" fn(u64) -> CUresult = unsafe { std::mem::transmute(funcptr) };
+                let ret = (code)(dataIn.val);
+                error!("hidden_0_6, ret is {:?}", ret);
+
+                dataOut.val = ret as u32;
+            }
+            Command::Cmd23 => {
+                let dataIn = unsafe {
+                    &*(addrIn as * const Cmd18In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd4Out)
+                };
+
+                let tableID: CUuuid;
+
+                if dataIn.val_u32 == 0 {
+                    tableID = CUuuid {
+                        bytes: [
+                            0x6b, -43i8, -5i8, 0x6c, 0x5b, -12i8, -25i8, 0x4a, -119i8, 
+                            -121i8, -39i8, 0x39, 0x12, -3i8, -99i8, -7i8,
+                        ],
+                    };
+                }
+                else if dataIn.val_u32 == 1 {
+                    tableID = CUuuid {
+                        bytes: [
+                            -96i8, -108i8, 0x79, -116i8, 0x2e, 0x74, 0x2e, 0x74, -109i8, 
+                            -14i8, 0x08, 0x00, 0x20, 0x0c, 0x0a, 0x66,
+                        ],
+                    };
+                }
+                else if dataIn.val_u32 == 2 {
+                    tableID = CUuuid {
+                        bytes: [
+                            0x42, -40i8, 0x5a, -127i8, 0x23, -10i8, -53i8, 0x47, -126i8, 
+                            -104i8, -10i8, -25i8, -118i8, 0x3a, -20i8, -36i8,
+                        ],
+                    };
+                }
+                else {
+                    tableID = CUuuid {
+                        bytes: [
+                            -58i8, -109i8, 0x33, 0x6e, 0x11, 0x21, -33i8, 0x11, -88i8, 
+                            -61i8, 0x68, -13i8, 0x55, -40i8, -107i8, -109i8,
+                        ],
+                    };
+                    error!("table No. = {}, arg2={}", dataIn.val_u32, dataIn.val_u64);
+                }
+
+                let mut pExportTable: *const ::std::os::raw::c_void = ptr::null_mut();
+
+                let ret = unsafe { cuGetExportTable(&mut pExportTable as *mut *const ::std::os::raw::c_void, &tableID) };
+                error!("cuGetExportTable, ret is {:?}, pExportTable={:?}", ret, pExportTable);
+
+                let addr: u64 = unsafe {
+                    *((pExportTable as *const u64).offset(2))
+                };
+
+                let funcptr = addr as *const ();
+                let code: extern "C" fn(*mut CUcontext, i32, *mut *const ::std::os::raw::c_void) -> CUresult = unsafe { std::mem::transmute(funcptr) };
+                let mut ctx: CUcontext = ptr::null_mut();
+                let ret = (code)(&mut ctx, 0, &mut pExportTable as *mut *const ::std::os::raw::c_void);
+                error!("hidden_3_2, ret is {:?}, ctx is {:?}", ret, ctx);
+
+                dataOut.val_u64 = ctx as u64;
+                dataOut.val_u32 = ret as u32;
+            }
+            Command::Cmd24 => {
+                let dataIn = unsafe {
+                    &mut *(addrIn as * mut Cmd2In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd4Out)
+                };
+
+                let mut ctx: CUcontext = ptr::null_mut();
+                let ret = unsafe { cuDevicePrimaryCtxRetain(&mut ctx, dataIn.val) };
+                error!("cuDevicePrimaryCtxRetain, ret is {:?}", ret);
+
+                dataOut.val_u64 = ctx as u64;
+                dataOut.val_u32 = ret as u32;
+            }
+            Command::Cmd25 => {
+                let dataIn = unsafe {
+                    &*(addrIn as * const Cmd25In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd1Out)
+                };
+
+                let tableID: CUuuid;
+
+                if dataIn.val_u32 == 0 {
+                    tableID = CUuuid {
+                        bytes: [
+                            0x6b, -43i8, -5i8, 0x6c, 0x5b, -12i8, -25i8, 0x4a, -119i8, 
+                            -121i8, -39i8, 0x39, 0x12, -3i8, -99i8, -7i8,
+                        ],
+                    };
+                }
+                else if dataIn.val_u32 == 1 {
+                    tableID = CUuuid {
+                        bytes: [
+                            -96i8, -108i8, 0x79, -116i8, 0x2e, 0x74, 0x2e, 0x74, -109i8, 
+                            -14i8, 0x08, 0x00, 0x20, 0x0c, 0x0a, 0x66,
+                        ],
+                    };
+                }
+                else if dataIn.val_u32 == 2 {
+                    tableID = CUuuid {
+                        bytes: [
+                            0x42, -40i8, 0x5a, -127i8, 0x23, -10i8, -53i8, 0x47, -126i8, 
+                            -104i8, -10i8, -25i8, -118i8, 0x3a, -20i8, -36i8,
+                        ],
+                    };
+                }
+                else {
+                    tableID = CUuuid {
+                        bytes: [
+                            -58i8, -109i8, 0x33, 0x6e, 0x11, 0x21, -33i8, 0x11, -88i8, 
+                            -61i8, 0x68, -13i8, 0x55, -40i8, -107i8, -109i8,
+                        ],
+                    };
+                    error!("table No. = {}, ptr={}, i32={}", dataIn.val_u32, dataIn.val_u64, dataIn.val_i32);
+                }
+
+                let mut pExportTable: *const ::std::os::raw::c_void = ptr::null_mut();
+
+                let ret = unsafe { cuGetExportTable(&mut pExportTable as *mut *const ::std::os::raw::c_void, &tableID) };
+                error!("cuGetExportTable, ret is {:?}, pExportTable={:?}", ret, pExportTable);
+
+                let addr: u64 = unsafe {
+                    *((pExportTable as *const u64).offset(0))
+                };
+
+                let funcptr = addr as *const ();
+                let code: extern "C" fn(i32, *mut *const ::std::os::raw::c_void, *mut CUcontext) -> CUresult = unsafe { std::mem::transmute(funcptr) };
+                let mut ctx: CUcontext = dataIn.val_u64 as CUcontext;
+                let ret = (code)(dataIn.val_i32, &mut pExportTable as *mut *const ::std::os::raw::c_void, &mut ctx);
+                error!("hidden_3_0, ret is {:?}, ctx is {:?}", ret, ctx);
+
+                dataOut.val = ret as u32;
+            }
+            Command::Cmd26 => {
+                let dataIn = unsafe {
+                    &mut *(addrIn as * mut Cmd26In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd4Out)
+                };
+
+                let mut pExportTable: *const ::std::os::raw::c_void = ptr::null_mut();
+
+                const TABLE0ID: CUuuid = CUuuid {
+                    bytes: [
+                        0x6b, -43i8, -5i8, 0x6c, 0x5b, -12i8, -25i8, 0x4a, -119i8, 
+                        -121i8, -39i8, 0x39, 0x12, -3i8, -99i8, -7i8,
+                    ],
+                };
+
+                let ret = unsafe { cuGetExportTable(&mut pExportTable as *mut *const ::std::os::raw::c_void, &TABLE0ID) };
+                error!("cuGetExportTable, ret is {:?}, pExportTable={:?}", ret, pExportTable);
+
+                let addr: u64 = unsafe {
+                    *((pExportTable as *const u64).offset(6))
+                };
+
+                let funcptr = addr as *const ();
+                let mut module: CUmodule = ptr::null_mut();
+                let mut arg2: u64 = dataIn.val1_u64;
+                let code: extern "C" fn(&mut CUmodule, *mut u64, u64, u64, i32) -> CUresult = unsafe { std::mem::transmute(funcptr) };
+                let ret = (code)(&mut module, &mut arg2, dataIn.val2_u64, dataIn.val3_u64, dataIn.val4_i32);
+                error!("hidden_0_5, ret is {:?}, arg2={:x}, arg3={:x}, arg4={:x}, arg5={}", 
+                ret, arg2, dataIn.val2_u64, dataIn.val3_u64, dataIn.val4_i32);
+
+                dataOut.val_u64 = module as u64;
+                dataOut.val_u32 = ret as u32;
+            }
+            Command::Cmd27 => {
+                let dataIn = unsafe {
+                    &*(addrIn as * const Cmd4In)
+                };
+
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd4Out)
+                };
+
+                let mut dptr = ptr::null_mut();
+                let ret = unsafe { cudaMalloc(&mut dptr as *mut *mut c_void, dataIn.val as usize) };
+                error!("cudaMalloc, ret is {:?}", ret);
+
+                dataOut.val_u64 = dptr as u64;
+                dataOut.val_u32 = ret as u32;
+            }
+            Command::Cmd28 => {
+                let dataOut = unsafe {
+                    &mut *(addrOut as * mut Cmd28Out)
+                };
+
+                unsafe {
+                    let lib = match libloading::Library::new("/usr/local/cuda/targets/x86_64-linux/lib/libcudart.so.11.0") {
+                        Ok(l) => l,
+                        Err(e) => {
+                            error!("Cannot load libcuda.so: {}", e);
+                            return 0;
+                        }
+                    };
+                
+                    let __cudaRegisterFatBinary: libloading::Symbol<unsafe extern fn(u64) -> u64> = 
+                                                 match lib.get(b"__cudaRegisterFatBinary") {
+                        Ok(s) => s,
+                        Err(e) => {
+                            error!("Could not load function __cudaRegisterFatBinary: {}", e);
+                            return 0;
+                        }
+                    };
+
+                    let ret = __cudaRegisterFatBinary(addrIn);
+                    error!("__cudaRegisterFatBinary, ret is {:?}", ret);
+
+                    dataOut.val = ret;
+                };
             }
         }
 

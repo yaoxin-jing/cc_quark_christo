@@ -195,12 +195,12 @@ fn CompileMounts(spec: &oci::Spec) -> Vec<oci::Mount> {
         options: Vec::new(),
     });
 
-    mounts.push(oci::Mount {
-        destination: "/proc".to_string(),
-        typ: PROCFS.to_string(),
-        source: "".to_string(),
-        options: Vec::new(),
-    });
+    // mounts.push(oci::Mount {
+    //     destination: "/proc".to_string(),
+    //     typ: PROCFS.to_string(),
+    //     source: "".to_string(),
+    //     options: Vec::new(),
+    // });
 
     mounts.push(oci::Mount {
         destination: "/sys".to_string(),
