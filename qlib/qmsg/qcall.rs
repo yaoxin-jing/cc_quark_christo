@@ -122,7 +122,11 @@ pub enum Msg {
     SwapOut(SwapOut),
     SwapIn(SwapIn),
     Proxy(Proxy),
+    HyperCallPerf(HyperCallPerf),
 }
+
+#[derive(Clone, Default, Debug)]
+pub struct HyperCallPerf {}
 
 #[derive(Clone, Default, Debug)]
 pub struct Proxy {

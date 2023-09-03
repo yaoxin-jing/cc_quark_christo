@@ -15,6 +15,7 @@
 use alloc::string::ToString;
 use alloc::sync::Arc;
 
+
 use super::super::fs::host::hostinodeop::*;
 use super::super::memmgr::mm::*;
 use super::super::memmgr::syscalls::*;
@@ -157,6 +158,8 @@ pub fn SysUnmap(task: &mut Task, args: &SyscallArguments) -> Result<i64> {
 
 pub fn SysBrk(task: &mut Task, args: &SyscallArguments) -> Result<i64> {
     let addr = args.arg0 as u64;
+
+    //crate::qlib::kernel::Kernel::HostSpace::HyperCallPerf(1000000);
 
     match task.mm.Brk(task, addr) {
         Ok(addr) => return Ok(addr as i64),

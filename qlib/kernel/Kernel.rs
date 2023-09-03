@@ -20,6 +20,7 @@ use super::super::qmsg::*;
 use super::super::socket_buf::*;
 use super::super::*;
 use crate::kernel_def::HyperCall64;
+use crate::qlib::kernel::Timestamp;
 
 extern "C" {
     pub fn rdtsc() -> i64;
@@ -354,6 +355,20 @@ impl HostSpace {
         });
 
         return HostSpace::HCall(&mut msg, false) as i64;
+    }
+
+    pub fn HyperCallPerf(count: u64) -> i64 {
+        let mut msg = Msg::HyperCallPerf(HyperCallPerf {
+        });
+
+        let startTime = Timestamp();
+        for _i in 0..count {
+            HostSpace::HCall(&mut msg, false) as i64;
+        }
+
+        let gap = Timestamp() - startTime;
+        error!("HyperCallPerf count {} gap {} avg {}", count, gap, gap * 1000 / count as i64);
+        return gap;
     }
 
     pub fn SwapInPage(addr: u64) -> i64 {

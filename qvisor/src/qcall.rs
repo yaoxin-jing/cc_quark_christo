@@ -387,6 +387,8 @@ impl KVMVcpu {
             Msg::HostMemoryBarrier(_) => {
                 VMSpace::HostMemoryBarrier();
             }
+            Msg::HyperCallPerf(_) => {
+            }
         };
 
         return ret;
