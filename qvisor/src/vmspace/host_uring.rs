@@ -27,6 +27,8 @@ use super::super::qlib::linux_def::*;
 use super::super::*;
 use super::kernel::SHARESPACE;
 use crate::URING;
+#[cfg(feature = "cc")]
+use std::borrow::Borrow;
 
 pub fn CopyCompleteEntry() -> usize {
     let mut count = 0;
@@ -60,61 +62,60 @@ pub fn CopyCompleteEntry() -> usize {
 
 #[inline]
 pub fn HostSubmit() -> Result<usize> {
-    let _count = CopyCompleteEntry();
-        
-    let mut count = 0;
+    if SHARESPACE.config.read().UringIO {
+        let _count = CopyCompleteEntry();
 
-    {
-        let mut uring = URING.lock();
-        let mut sq = uring.submission();
-        let mut submitq = SHARESPACE.uringQueue.submitq.lock();
+        let mut count = 0;
+        {
+            let mut uring = URING.lock();
+            let mut sq = uring.submission();
+            #[cfg(not(feature = "cc"))]
+            let mut submitq = SHARESPACE.uringQueue.submitq.lock();
+            #[cfg(feature = "cc")]
+            let submitq = SHARESPACE.uringQueue.submitq.borrow();
 
-        if sq.dropped() != 0 {
-            error!("uring fail dropped {}", sq.dropped());
-        }
+            assert!(sq.dropped() == 0, "uring dropped {}", sq.dropped());
+            assert!(!sq.cq_overflow());
 
-        if sq.cq_overflow() {
-            error!("uring fail overflow")
-        }
-        assert!(sq.dropped() == 0, "dropped {}", sq.dropped());
-        assert!(!sq.cq_overflow());
+            while !sq.is_full() {
+                #[cfg(not(feature = "cc"))]
+                let uringEntry = match submitq.pop_front() {
+                    None => break,
+                    Some(e) => e,
+                };
+                #[cfg(feature = "cc")]
+                let uringEntry = match submitq.pop() {
+                    None => break,
+                    Some(e) => e,
+                };
 
-        while !sq.is_full() {
-            let uringEntry = match submitq.pop_front() {
-                None => break,
-                Some(e) => e,
-            };
+                let entry = match &uringEntry.ops {
+                    UringOps::UringCall(call) => call.Entry(),
+                    UringOps::AsyncOps(ops) => ops.Entry(),
+                };
 
-            let entry = match &uringEntry.ops {
-                UringOps::UringCall(call) => {
-                    call.Entry()
+                let entry = entry.user_data(uringEntry.userdata);
+                let entry = if uringEntry.linked {
+                    entry.flags(squeue::Flags::IO_LINK)
+                } else {
+                    entry
+                };
+
+                unsafe {
+                    match sq.push(&entry) {
+                        Ok(_) => (),
+                        Err(_) => panic!("AUringCall submission queue is full"),
+                    }
                 }
-                UringOps::AsyncOps(ops) => {
-                    ops.Entry()
-                }
-            };
-    
-            let entry = entry.user_data(uringEntry.userdata);
-            let entry = if uringEntry.linked {
-                entry.flags(squeue::Flags::IO_LINK)
-            } else {
-                entry
-            };
 
-            unsafe {
-                match sq.push(&entry) {
-                    Ok(_) => (),
-                    Err(_) => panic!("AUringCall submission queue is full"),
-                }
+                count += 1;
             }
-
-            count += 1;
         }
-    }
 
-    if count > 0 {
-        let ret = URING.lock().submit_and_wait(0)?;
-        return Ok(ret);
+        if count > 0 {
+            let ret = URING.lock().submit_and_wait(0)?;
+            return Ok(ret);
+        }
     }
 
     return Ok(0);
