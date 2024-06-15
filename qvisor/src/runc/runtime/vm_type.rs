@@ -18,7 +18,7 @@ pub mod resources;
 
 use std::sync::Arc;
 use kvm_ioctls::{Kvm, VmFd};
-use crate::{elf_loader::KernelELF, kvm_vcpu::KVMVcpu, qlib::common::Error, runc::runtime};
+use crate::{arch::vm::vcpu::ArchVirtCpu, elf_loader::KernelELF, qlib::common::Error, runc::runtime};
 use runtime::{vm::VirtualMachine, loader::Args};
 
 pub trait VmType: std::fmt::Debug {
@@ -36,7 +36,7 @@ pub trait VmType: std::fmt::Debug {
     fn post_memory_initialize(&mut self) -> Result<(), Error>;
     fn vm_vcpu_initialize(&self, kvm: &Kvm, vm_fd: &VmFd, total_vcpus: usize, entry_addr: u64,
                         auto_start: bool, page_allocator_addr: Option<u64>,
-                        share_space_addr: Option<u64>) -> Result<Vec<Arc<KVMVcpu>>, Error>;
+                        share_space_addr: Option<u64>) -> Result<Vec<Arc<ArchVirtCpu>>, Error>;
     fn post_vm_initialize(&mut self) -> Result<(), Error>;
     fn post_init_upadate(&mut self) -> Result<(), Error>;
 }

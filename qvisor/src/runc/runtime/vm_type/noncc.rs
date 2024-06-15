@@ -12,30 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::super::vm::VirtualMachine;
+use super::{resources::{MemArea, MemLayoutConfig, VmResources}, VmType};
+use crate::arch::{VirtCpu, ConfCompType::NoConf, vm::vcpu::ArchVirtCpu};
+use crate::qlib::kernel::{vcpu, IOURING, KERNEL_PAGETABLE, PAGE_MGR};
+use crate::{elf_loader::KernelELF, print::LOG, qlib, runc::runtime, tsot_agent::TSOT_AGENT,
+            vmspace::VMSpace, KERNEL_IO_THREAD, PMA_KEEPER, QUARK_CONFIG, ROOT_CONTAINER_ID,
+            SHARE_SPACE, SHARE_SPACE_STRUCT, URING_MGR, VMS};
+use addr::{Addr, PageOpts};
+use kernel::{kernel::futex, kernel::timer, task, KERNEL_STACK_ALLOCATOR, SHARESPACE};
+use kvm_bindings::kvm_enable_cap;
+use kvm_ioctls::{Cap, Kvm, VmFd};
+use pagetable::{AlignedAllocator, PageTables};
+use qlib::{addr, common::Error, kernel, linux_def::MemoryDef, pagetable};
+use runtime::{loader::Args, vm};
+use std::fmt;
 use std::ops::Deref;
 use std::os::fd::FromRawFd;
 use std::sync::Arc;
-use std::fmt;
-use kvm_bindings::kvm_enable_cap;
-use kvm_ioctls::{Cap, Kvm, VmFd};
-use crate::qlib::kernel::{vcpu, IOURING, KERNEL_PAGETABLE, PAGE_MGR};
-use crate::{QUARK_CONFIG, ROOT_CONTAINER_ID, runc::runtime, vmspace::VMSpace,
-            elf_loader::KernelELF, qlib, kvm_vcpu::KVMVcpu, PMA_KEEPER,
-            SHARE_SPACE_STRUCT, SHARE_SPACE,VMS, KERNEL_IO_THREAD,
-            tsot_agent::TSOT_AGENT, print::LOG, URING_MGR};
-use runtime::{vm, loader::Args};
-use qlib::{common::Error, linux_def::MemoryDef, pagetable, addr, kernel};
-use pagetable::{PageTables, AlignedAllocator};
-use kernel::{SHARESPACE, KERNEL_STACK_ALLOCATOR, task, kernel::futex,
-             kernel::timer};
-use addr::{PageOpts, Addr};
-use super::VmType;
-use super::resources::{VmResources, MemLayoutConfig, MemArea};
-use super::super::vm::VirtualMachine;
 
-use MemArea::{SharedHeapArea, KernelArea, FileMapArea};
 #[cfg(target_arch = "aarch64")]
-use MemArea::HyperacallMmioArea;
+use MemArea::HypercallMmioArea;
+use MemArea::{FileMapArea, KernelArea, SharedHeapArea};
 
 pub struct VmNormal {
     vm_resources: VmResources,
@@ -46,7 +44,7 @@ pub struct VmNormal {
 impl fmt::Debug for VmNormal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "VmNormal[\nVM Resources:{:?},\nEntry Address:{:#x},\nVDSO Address:{:#x}]",
-               self.vm_resources, self.entry_address, self.vdso_address)
+            self.vm_resources, self.entry_address, self.vdso_address)
     }
 }
 
@@ -62,10 +60,11 @@ impl VmType for VmNormal {
             kernel_size: MemoryDef::KERNEL_MEM_INIT_REGION_SIZE * MemoryDef::ONE_GB,
             file_map_area_base: MemoryDef::FILE_MAP_OFFSET,
             file_map_area_size: MemoryDef::FILE_MAP_SIZE,
-            #[cfg(target = "aarch64")]
+            #[cfg(target_arch = "aarch64")]
             hypercall_mmio_base: MemoryDef::HYPERCALL_MMIO_BASE,
-            #[cfg(target = "aarch64")]
-            hypercall_mmio_size: MemoryDef::HYPERCALL_MMIO_SIZE
+            #[cfg(target_arch = "aarch64")]
+            hypercall_mmio_size: MemoryDef::HYPERCALL_MMIO_SIZE,
+            stack_size: MemoryDef::DEFAULT_STACK_SIZE as usize,
         };
         let default_mem_layout = mem_layout_config;
         let _kernel_bin_path = VirtualMachine::KERNEL_IMAGE.to_string();
@@ -73,9 +72,11 @@ impl VmType for VmNormal {
         let _sbox_uid_name = vm::SANDBOX_UID_NAME.to_string();
 
         let mut elf = KernelELF::New().expect("Failed to create elf object.");
-        let _kernel_entry = elf.LoadKernel(_kernel_bin_path.as_str())
+        let _kernel_entry = elf
+            .LoadKernel(_kernel_bin_path.as_str())
             .expect("Failed to load kernel from given path.");
-        elf.LoadVDSO(_vdso_bin_path.as_str()).expect("Failed to load vdso from given path.");
+        elf.LoadVDSO(_vdso_bin_path.as_str())
+            .expect("Failed to load vdso from given path.");
         let _vdso_address = elf.vdsoStart;
 
         let normal_vm = Self {
@@ -95,19 +96,23 @@ impl VmType for VmNormal {
         Ok((box_type, elf))
     }
 
-    fn create_vm(self: Box<VmNormal>, kernel_elf: KernelELF, args: Args)
-        -> Result<VirtualMachine, Error> {
+    fn create_vm(
+        self: Box<VmNormal>,
+        kernel_elf: KernelELF,
+        args: Args,
+    ) -> Result<VirtualMachine, Error> {
         *ROOT_CONTAINER_ID.lock() = args.ID.clone();
         if QUARK_CONFIG.lock().PerSandboxLog {
-            let sandbox_name = match args.Spec.annotations
-                .get(self.vm_resources.sandbox_uid_name.as_str()) {
-                    None => {
-                        args.ID[0..12].to_owned()
-                    },
-                    Some(name) => name.clone()
+            let sandbox_name = match args
+                .Spec
+                .annotations
+                .get(self.vm_resources.sandbox_uid_name.as_str())
+            {
+                None => args.ID[0..12].to_owned(),
+                Some(name) => name.clone(),
             };
             LOG.Reset(&sandbox_name);
-         }
+        }
 
         let cpu_count = args.GetCpuCount();
         let reserve_cpu_count = QUARK_CONFIG.lock().ReserveCpuCount;
@@ -128,9 +133,10 @@ impl VmType for VmNormal {
         pod_id.copy_from_slice(VMS.lock().args.as_ref().unwrap().ID.clone().as_bytes());
         let _vcpu_total = VMS.lock().vcpuCount;
         let _ctrl_sock = VMS.lock().controlSock;
-        let _rdma_sock =VMS.lock().args.as_ref().unwrap().RDMASvcCliSock;
-        if let Err(e) = self.init_share_space(_vcpu_total, _ctrl_sock, _rdma_sock,
-            pod_id, None, None) {
+        let _rdma_sock = VMS.lock().args.as_ref().unwrap().RDMASvcCliSock;
+        if let Err(e) =
+            self.init_share_space(_vcpu_total, _ctrl_sock, _rdma_sock, pod_id, None, None)
+        {
             error!("VM creation failed on VM-Space initialization.");
             return Err(e);
         } else {
@@ -149,18 +155,27 @@ impl VmType for VmNormal {
                 _kvm = __kvm;
                 vm_fd = __vm_fd;
                 info!("VM cration - kvm-vm_fd initialized.");
-            },
+            }
             Err(e) => {
                 error!("VM creation failed on kvm-vm creation.");
                 return Err(e);
             }
         };
 
-        self.vm_memory_initialize(&vm_fd).expect("VM creation failed on memory initialization.");
+        self.vm_memory_initialize(&vm_fd)
+            .expect("VM creation failed on memory initialization.");
         let (heap_base, _) = self.vm_resources.mem_area_info(SharedHeapArea).unwrap();
         let _auto_start = VMS.lock().args.as_ref().unwrap().AutoStart;
-        let _vcpus = self.vm_vcpu_initialize(&_kvm, &vm_fd, _vcpu_total, self.entry_address,
-            _auto_start, Some(heap_base), Some(SHARE_SPACE.Value()))
+        let _vcpus = self
+            .vm_vcpu_initialize(
+                &_kvm,
+                &vm_fd,
+                _vcpu_total,
+                self.entry_address,
+                _auto_start,
+                Some(heap_base),
+                Some(SHARE_SPACE.Value()),
+            )
             .expect("VM creation failed on vcpu creation.");
 
         let _vm_type: Box<dyn VmType> = self;
@@ -182,8 +197,11 @@ impl VmType for VmNormal {
         vms.controlSock = args.ControlSock;
         vms.vdsoAddr = self.vdso_address;
         vms.pivot = args.Pivot;
-        if let Some(id) = args.Spec.annotations
-                              .get(self.vm_resources.sandbox_uid_name.as_str()) {
+        if let Some(id) = args
+            .Spec
+            .annotations
+            .get(self.vm_resources.sandbox_uid_name.as_str())
+        {
             vms.podUid = id.clone();
         } else {
             info!("No sandbox id found in specification.");
@@ -198,25 +216,33 @@ impl VmType for VmNormal {
         page_opt = PageOpts::Kernel();
         let (kmem_base, kmem_size) = self.vm_resources.mem_area_info(KernelArea).unwrap();
         vms.KernelMapHugeTable(Addr(kmem_base), Addr(kmem_base + kmem_size),
-                               Addr(kmem_base), page_opt.Val())?;
+            Addr(kmem_base), page_opt.Val(),)?;
 
-        #[cfg(target_arch = "aarch64")] {
+        #[cfg(target_arch = "aarch64")]
+        {
             page_opt = PageOpts::Zero();
             page_opt.SetWrite().SetGlobal().SetPresent().SetAccessed().SetMMIOPage();
-            let (hcall_base, hcall_size) = self.vm_resources
-                                               .mem_area_info(HypercallMmioArea).unwrap();
-            vms.KernelMapHugeTable(Addr(hcall_base), Addr(hcall_base + hcall_size),
-                                   Addr(hcall_base), page_opt.Val())?;
+            let (hcall_base, hcall_size) =
+                self.vm_resources.mem_area_info(HypercallMmioArea).unwrap();
+            vms.KernelMap(Addr(hcall_base), Addr(hcall_base + hcall_size),
+                Addr(hcall_base), page_opt.Val())?;
         }
         vms.args = Some(args);
 
         Ok(())
     }
 
-    fn init_share_space(&self, cpu_count: usize, control_sock: i32, rdma_svc_cli_sock: i32,
-        pod_id: [u8; 64], _share_space_addr: Option<u64>, _has_global_mem_barrierr: Option<bool>)
-        -> Result<(), Error> {
-        SHARE_SPACE_STRUCT.lock()
+    fn init_share_space(
+        &self,
+        cpu_count: usize,
+        control_sock: i32,
+        rdma_svc_cli_sock: i32,
+        pod_id: [u8; 64],
+        _share_space_addr: Option<u64>,
+        _has_global_mem_barrierr: Option<bool>,
+    ) -> Result<(), Error> {
+        SHARE_SPACE_STRUCT
+            .lock()
             .Init(cpu_count, control_sock, rdma_svc_cli_sock, pod_id);
         let shared_space_table = SHARE_SPACE_STRUCT.lock().deref().Addr();
         SHARE_SPACE.SetValue(shared_space_table);
@@ -231,7 +257,8 @@ impl VmType for VmNormal {
             PAGE_MGR.SetValue(share_space_ptr.GetPageMgrAddr());
             KERNEL_STACK_ALLOCATOR.Init(AlignedAllocator::New(
                 MemoryDef::DEFAULT_STACK_SIZE as usize,
-                MemoryDef::DEFAULT_STACK_SIZE as usize));
+                MemoryDef::DEFAULT_STACK_SIZE as usize,
+            ));
             task::InitSingleton();
             futex::InitSingleton();
             timer::InitSingleton();
@@ -249,27 +276,26 @@ impl VmType for VmNormal {
     }
 
     fn create_kvm_vm(&self, kvm_fd: i32) -> Result<(Kvm, VmFd), Error> {
-        let kvm = unsafe {
-            Kvm::from_raw_fd(kvm_fd)
-        };
+        let kvm = unsafe { Kvm::from_raw_fd(kvm_fd) };
 
         if !kvm.check_extension(Cap::ImmediateExit) {
             panic!("Can not create VM - KVM_CAP_IMMEDIATE_EXIT is not supported.");
         }
 
-        let vm_fd = kvm.create_vm()
-                       .map_err(|e| Error::IOError(
-                       format!("Failed to create a kvm-vm with error:{:?}", e)))?;
+        let vm_fd = kvm
+            .create_vm()
+            .map_err(|e| Error::IOError(format!("Failed to create a kvm-vm with error:{:?}", e)))?;
 
-        #[cfg(target_arch = "x86_64")] {
+        #[cfg(target_arch = "x86_64")]
+        {
             let mut cap: kvm_enable_cap = Default::default();
             cap.cap = kvm_bindings::KVM_CAP_X86_DISABLE_EXITS;
             cap.args[0] = (kvm_bindings::KVM_X86_DISABLE_EXITS_HLT
-                            | kvm_bindings::KVM_X86_DISABLE_EXITS_MWAIT) as u64;
+                | kvm_bindings::KVM_X86_DISABLE_EXITS_MWAIT) as u64;
             vm_fd.enable_cap(&cap).unwrap();
         }
 
-       Ok((kvm, vm_fd))
+        Ok((kvm, vm_fd))
     }
 
     fn vm_memory_initialize(&self, vm_fd: &VmFd) -> Result<(), Error> {
@@ -283,46 +309,40 @@ impl VmType for VmNormal {
         };
 
         unsafe {
-            vm_fd.set_user_memory_region(kvm_mem_region)
-                .map_err(|e| Error::IOError(
-                    format!("Failed to set kvm memory region with error:{:?}", e)))?;
+            vm_fd.set_user_memory_region(kvm_mem_region).map_err(|e| {
+                Error::IOError(format!("Failed to set kvm memory region - error:{:?}", e))})?;
         }
 
-        info!("SetMemRegion phyAddr = {:#x}, hostAddr={:#x}; pageMmapsize = {:#x} MB",
-            kmem_base, kmem_base, kmem_size >> 20);
+        info!("SetMemRegion - phyAddr:{:#x}, hostAddr:{:#x}, page mmap-size:{:#x} MB",
+            kmem_base, kmem_base,kmem_size >> 20);
 
         Ok(())
     }
 
-    fn vm_vcpu_initialize(&self, kvm: &Kvm, vm_fd: &VmFd, total_vcpus: usize,
-        entry_addr: u64, auto_start: bool, page_allocator_addr: Option<u64>,
-        share_space_addr: Option<u64>) -> Result<Vec<Arc<KVMVcpu>>, Error> {
-        let mut vcpus: Vec<Arc<KVMVcpu>> = Vec::with_capacity(total_vcpus);
-        //NOTE: Will be moved by vcpu refactoring.
-        #[cfg(target_arch = "x86_64")]
-        let kvm_cpu_id = kvm.get_supported_cpuid(kvm_bindings::KVM_MAX_CPUID_ENTRIES).unwrap();
-
-        for vcpu_id in  0..total_vcpus {
-            let vcpu = Arc::new(
-                KVMVcpu::Init(
-                    vcpu_id as usize,
-                    total_vcpus,
-                    &vm_fd,
-                    entry_addr,
-                    page_allocator_addr.expect("VM expects addess of the heap."),
-                    share_space_addr.expect("VM expects addess of the shared space."),
-                    auto_start)?);
-            #[cfg(target_arch = "x86_64")]
-            vcpu.vcpu.set_cpuid2(&kvm_cpu_id).unwrap();
+    fn vm_vcpu_initialize(
+        &self,
+        kvm: &Kvm,
+        vm_fd: &VmFd,
+        total_vcpus: usize,
+        entry_addr: u64,
+        auto_start: bool,
+        page_allocator_addr: Option<u64>,
+        share_space_addr: Option<u64>,
+    ) -> Result<Vec<Arc<ArchVirtCpu>>, Error> {
+        let mut vcpus: Vec<Arc<ArchVirtCpu>> = Vec::with_capacity(total_vcpus);
+        for vcpu_id in 0..total_vcpus {
+            let vcpu = Arc::new(ArchVirtCpu::new_vcpu(
+                vcpu_id as usize,
+                total_vcpus,
+                &vm_fd,
+                entry_addr,
+                page_allocator_addr,
+                share_space_addr,
+                auto_start,
+                self.vm_resources.mem_layout.stack_size,
+                Some(&kvm),
+                NoConf)?);
             vcpus.push(vcpu);
-        }
-
-        //TODO: Will be moved by vcpu refactoring.
-        #[cfg(target_arch = "aarch64")] {
-            let kvi = vm::VirtualMachine::get_kvm_vcpu_init(&vm_fd)?;
-            for vcpu in vcpus.iter() {
-                vcpu.vcpu.vcpu_init(&kvi).map_err(|e| Error::SysError(e.errno()))?;
-            }
         }
         VMS.lock().vcpus = vcpus.clone();
 

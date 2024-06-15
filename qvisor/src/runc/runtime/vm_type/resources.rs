@@ -19,7 +19,7 @@ pub enum MemArea {
     SharedHeapArea,
     KernelArea,
     FileMapArea,
-    HyperacallMmioArea,
+    HypercallMmioArea,
 }
 
 pub struct VmResources {
@@ -48,7 +48,7 @@ impl VmResources {
                 Some((self.mem_layout.file_map_area_base,
                       self.mem_layout.file_map_area_size)),
             #[cfg(target_arch = "aarch64")]
-            MemArea::HyperacallMmioArea =>
+            MemArea::HypercallMmioArea =>
                 Some((self.mem_layout.hypercall_mmio_base,
                       self.mem_layout.hypercall_mmio_size)),
             _ => None
@@ -78,7 +78,8 @@ pub(in super) struct MemLayoutConfig {
     #[cfg(target_arch = "aarch64")]
     pub(in super) hypercall_mmio_base: u64,
     #[cfg(target_arch = "aarch64")]
-    pub(in super) hypercall_mmio_size: u64
+    pub(in super) hypercall_mmio_size: u64,
+    pub(in super) stack_size: usize,
 }
 
 impl fmt::Debug for MemLayoutConfig {
@@ -101,8 +102,9 @@ impl fmt::Debug for MemLayoutConfig {
         write!(f, "MemLayoutConfig[\nPrivate-Heap Memory base:{:#x},\nPrivate-Heap Memory size:{:#x},\n\
               Shared-Heap Memory base:{:#x},\nShared-Heap Memory size:{:#x},\nKernel base:{:#x},\n\
               Kernel size:{:#x},\nFile-Map base:{:#x},\n File-Map size:{:#x},\n\
-              Hyperacall-MMIO base:{:#x},\nHypercall-MMIO size:{:#x}]", pmb, pms,
+              Hyperacall-MMIO base:{:#x},\nHypercall-MMIO size:{:#x}],\nStack size:{:#x}", pmb, pms,
               self.shared_heap_mem_base, self.shared_heap_mem_size, self.kernel_base,
-              self.kernel_size, self.file_map_area_base, self.file_map_area_size, hcb, hcs)
+              self.kernel_size, self.file_map_area_base, self.file_map_area_size, hcb, hcs,
+              self.stack_size)
     }
 }
