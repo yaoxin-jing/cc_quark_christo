@@ -28,6 +28,10 @@ use super::super::threadmgr::task_sched::*;
 use super::super::MainRun;
 use super::super::SignalDef::*;
 use super::super::SHARESPACE;
+#[cfg(feature = "tdx")]
+use crate::qlib::kernel::Kernel::IS_INITIALIZED;
+#[cfg(feature = "tdx")]
+use tdx_tdcall::*;
 
 #[derive(Clone, Copy, Debug, core::cmp::PartialEq)]
 pub enum ExceptionStackVec {
@@ -82,6 +86,7 @@ extern "C" {
     pub fn machine_check_handler();
     pub fn simd_fp_handler();
     pub fn virtualization_handler();
+    pub fn kvm_injected_handler();
     pub fn security_handler();
 }
 
@@ -126,7 +131,7 @@ pub unsafe fn InitSingleton() {
     idt.set_handler(19, simd_fp_handler).set_stack_index(0);
     idt.set_handler(20, virtualization_handler)
         .set_stack_index(0);
-
+    idt.set_handler(22, kvm_injected_handler).set_stack_index(0);
     idt.set_handler(30, security_handler).set_stack_index(0);
 
     IDT.Init(idt);
@@ -711,7 +716,7 @@ pub extern "C" fn SIMDFPHandler(sf: &mut PtRegs) {
 }
 
 #[no_mangle]
-pub extern "C" fn VirtualizationHandler(ptRegs: &mut PtRegs) {
+pub extern "C" fn KvmInjectHandler(ptRegs: &mut PtRegs) {
     // from user
     CPULocal::Myself().SetMode(VcpuMode::Kernel);
     let mask = CPULocal::Myself().ResetInterruptMask();
@@ -720,7 +725,7 @@ pub extern "C" fn VirtualizationHandler(ptRegs: &mut PtRegs) {
 
     if ptRegs.cs & 0x3 == 0 {
         // kernel mode
-        error!("VirtualizationHandler kernel ...");
+        error!("KvmInjectHandler kernel ...");
         //CPULocal::Myself().SetMode(VcpuMode::User);
         currTask.mm.HandleTlbShootdown();
         return;
@@ -767,6 +772,186 @@ pub extern "C" fn VirtualizationHandler(ptRegs: &mut PtRegs) {
 
     CPULocal::Myself().SetMode(VcpuMode::User);
     currTask.mm.HandleTlbShootdown();
+}
+
+//Rewrite from https://github.com/confidential-containers/td-shim/tree/main/td-exception
+#[cfg(feature = "tdx")]
+const EXIT_REASON_CPUID: u32 = 10;
+#[cfg(feature = "tdx")]
+const EXIT_REASON_HLT: u32 = 12;
+#[cfg(feature = "tdx")]
+const EXIT_REASON_RDPMC: u32 = 15;
+#[cfg(feature = "tdx")]
+const EXIT_REASON_VMCALL: u32 = 18;
+#[cfg(feature = "tdx")]
+const EXIT_REASON_IO_INSTRUCTION: u32 = 30;
+#[cfg(feature = "tdx")]
+const EXIT_REASON_MSR_READ: u32 = 31;
+#[cfg(feature = "tdx")]
+const EXIT_REASON_MSR_WRITE: u32 = 32;
+#[cfg(feature = "tdx")]
+const EXIT_REASON_MWAIT_INSTRUCTION: u32 = 36;
+#[cfg(feature = "tdx")]
+const EXIT_REASON_MONITOR_INSTRUCTION: u32 = 39;
+#[cfg(feature = "tdx")]
+const EXIT_REASON_WBINVD: u32 = 54;
+
+#[cfg(feature = "tdx")]
+#[no_mangle]
+pub extern "C" fn VirtualizationHandler(ptRegs: &mut PtRegs) {
+    use core::sync::atomic::Ordering;
+    let initialized = IS_INITIALIZED.load(Ordering::Acquire);
+    let from_user = ptRegs.cs & 0x3 != 0;
+    if initialized {
+        // from user
+        CPULocal::Myself().SetMode(VcpuMode::Kernel);
+        let currTask = Task::Current();
+        //currTask.mm.VcpuLeave();
+        if from_user {
+            let mut rflags = ptRegs.eflags;
+            rflags &= !USER_FLAGS_CLEAR;
+            rflags |= USER_FLAGS_SET;
+            ptRegs.eflags = rflags;
+            ptRegs.ss |= 3;
+            currTask.SaveFp();
+        }
+    }
+    let ve_info = tdx::tdcall_get_ve_info().expect("#VE handler: fail to get VE info\n");
+
+    match ve_info.exit_reason {
+        EXIT_REASON_HLT => {
+            tdx::tdvmcall_halt();
+        }
+        EXIT_REASON_IO_INSTRUCTION => {
+            if !handle_tdx_ioexit(&ve_info, ptRegs) {
+                tdx::tdvmcall_halt();
+            }
+        }
+        EXIT_REASON_MSR_READ => {
+            let msr =
+                tdx::tdvmcall_rdmsr(ptRegs.rcx as u32).expect("fail to perform RDMSR operation\n");
+            ptRegs.rax = (msr as u32 & u32::MAX) as u64; // EAX
+            ptRegs.rdx = ((msr >> 32) as u32 & u32::MAX) as u64; // EDX
+        }
+        EXIT_REASON_MSR_WRITE => {
+            let data = ptRegs.rax as u64 | ((ptRegs.rdx as u64) << 32); // EDX:EAX
+            tdx::tdvmcall_wrmsr(ptRegs.rcx as u32, data)
+                .expect("fail to perform WRMSR operation\n");
+        }
+        EXIT_REASON_CPUID => {
+            let cpuid = tdx::tdvmcall_cpuid(ptRegs.rax as u32, ptRegs.rcx as u32);
+            let mask = 0xFFFF_FFFF_0000_0000;
+            ptRegs.rax = (ptRegs.rax & mask) | cpuid.eax as u64;
+            ptRegs.rbx = (ptRegs.rbx & mask) | cpuid.ebx as u64;
+            ptRegs.rcx = (ptRegs.rcx & mask) | cpuid.ecx as u64;
+            ptRegs.rdx = (ptRegs.rdx & mask) | cpuid.edx as u64;
+        }
+        EXIT_REASON_VMCALL
+        | EXIT_REASON_MWAIT_INSTRUCTION
+        | EXIT_REASON_MONITOR_INSTRUCTION
+        | EXIT_REASON_WBINVD
+        | EXIT_REASON_RDPMC => return,
+        // Unknown
+        // And currently CPUID and MMIO handler is not implemented
+        // Only VMCall is supported
+        _ => {
+            warn!("Unsupported #VE exit reason {:#x} ", ve_info.exit_reason);
+            info!("Virtualization fault\n");
+            deadloop();
+        }
+    };
+
+    ptRegs.rip += ve_info.exit_instruction_length as u64;
+    if from_user && initialized {
+        let currTask = Task::Current();
+        CPULocal::SetKernelStack(currTask.GetKernelSp());
+        //currTask.mm.VcpuEnter();
+        CPULocal::Myself().SetMode(VcpuMode::User);
+        currTask.mm.HandleTlbShootdown();
+        currTask.RestoreFp();
+    }
+}
+
+// Handle IO exit from TDX Module
+//
+// Use TDVMCALL to realize IO read/write operation
+// Return false if VE info is invalid
+#[cfg(feature = "tdx")]
+fn handle_tdx_ioexit(ve_info: &tdx::TdVeInfo, ptRegs: &mut PtRegs) -> bool {
+    let size = ((ve_info.exit_qualification & 0x7) + 1) as usize; // 0 - 1bytes, 1 - 2bytes, 3 - 4bytes
+    let read = (ve_info.exit_qualification >> 3) & 0x1 == 1;
+    let string = (ve_info.exit_qualification >> 4) & 0x1 == 1;
+    let _operand = (ve_info.exit_qualification >> 6) & 0x1 == 0; // 0 = DX, 1 = immediate
+    let port = (ve_info.exit_qualification >> 16) as u16;
+    let repeat = if (ve_info.exit_qualification >> 5) & 0x1 == 1 {
+        ptRegs.rcx
+    } else {
+        0
+    };
+
+    // Size of access should be 1/2/4 bytes
+    if size != 1 && size != 2 && size != 4 {
+        return false;
+    }
+
+    // Define closure to perform IO port read with different size operands
+    let io_read = |size, port| match size {
+        1 => tdx::tdvmcall_io_read_8(port) as u32,
+        2 => tdx::tdvmcall_io_read_16(port) as u32,
+        4 => tdx::tdvmcall_io_read_32(port),
+        _ => 0,
+    };
+
+    // Define closure to perform IO port write with different size operands
+    let io_write = |size, port, data| match size {
+        1 => tdx::tdvmcall_io_write_8(port, data as u8),
+        2 => tdx::tdvmcall_io_write_16(port, data as u16),
+        4 => tdx::tdvmcall_io_write_32(port, data),
+        _ => {}
+    };
+
+    // INS / OUTS
+    if string {
+        for _ in 0..repeat {
+            if read {
+                let val = io_read(size, port);
+                unsafe {
+                    let rsi = core::slice::from_raw_parts_mut(ptRegs.rdi as *mut u8, size);
+                    // Safety: size is smaller than 4
+                    rsi.copy_from_slice(&u32::to_le_bytes(val)[..size])
+                }
+                ptRegs.rdi += size as u64;
+            } else {
+                let mut val = 0;
+                unsafe {
+                    let rsi = core::slice::from_raw_parts(ptRegs.rsi as *mut u8, size);
+                    for (idx, byte) in rsi.iter().enumerate() {
+                        val |= (*byte as u32) << (idx * 8);
+                    }
+                }
+                io_write(size, port, val);
+                ptRegs.rsi += size as u64;
+            }
+            ptRegs.rcx -= 1;
+        }
+    } else if read {
+        // Write the IO read result to the low $size-bytes of rax
+        ptRegs.rax = (ptRegs.rax & !(2_u64.pow(size as u32 * 8) - 1))
+            | (io_read(size, port) as u64 & (2_u64.pow(size as u32 * 8) - 1));
+    } else {
+        io_write(size, port, ptRegs.rax as u32);
+    }
+
+    true
+}
+
+#[cfg(feature = "tdx")]
+fn deadloop() {
+    #[allow(clippy::empty_loop)]
+    loop {
+        x86_64::instructions::interrupts::enable();
+        x86_64::instructions::hlt();
+    }
 }
 
 #[no_mangle]

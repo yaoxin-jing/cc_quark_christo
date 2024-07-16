@@ -25,7 +25,7 @@ impl KVMVcpu {
     pub fn interrupt_guest(&self) {
         use::std::os::fd::AsRawFd;
         const KVM_INTERRUPT: u64 = 0x4004ae86;
-        let bounce: u32 = 20; //VirtualizationException
+        let bounce: u32 = 22; //Self defined KvmInject Interrupt
         let ret = unsafe {
             libc::ioctl(
                 self.vcpu_fd.as_raw_fd(),

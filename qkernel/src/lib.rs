@@ -47,6 +47,7 @@ extern crate scopeguard;
 extern crate serde_derive;
 extern crate log;
 extern crate spin;
+extern crate tdx_tdcall;
 #[cfg(target_arch = "x86_64")]
 extern crate x86_64;
 extern crate xmas_elf;

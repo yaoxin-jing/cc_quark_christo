@@ -20,6 +20,7 @@
 .globl machine_check_handler
 .globl simd_fp_handler
 .globl virtualization_handler
+.globl kvm_injected_handler
 .globl security_handler
 
 .extern syscall_handler, CopyData,
@@ -43,6 +44,7 @@
 .extern MachineCheckHandler
 .extern SIMDFPHandler
 .extern VirtualizationHandler
+.extern KvmInjectHandler
 .extern SecurityHandler
 
 .intel_syntax noprefix
@@ -410,6 +412,9 @@ simd_fp_handler:
 
 virtualization_handler:
     HandlerWithoutErrorCode VirtualizationHandler
+
+kvm_injected_handler:
+    HandlerWithoutErrorCode KvmInjectHandler
 
 security_handler:
     HandlerWithoutErrorCode SecurityHandler
