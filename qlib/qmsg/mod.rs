@@ -14,6 +14,6 @@
 
 //pub mod output;
 pub mod qcall;
-#[cfg(feature = "cc")]
+//#[cfg(feature = "cc")]
 pub mod sharepara;
 pub use super::qcall::*;
