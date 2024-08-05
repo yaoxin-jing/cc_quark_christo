@@ -250,11 +250,15 @@ impl FdWaitInfo {
     }
 
     pub fn UpdateFDAsync(&self, fd: i32, epollfd: i32) -> Result<()> {
+        #[cfg(feature = "cc")]
         if SHARESPACE.config.read().UringIO {
-            return self.UringUpdate(fd, epollfd);
-        } else {
-            return self.UpdateFDSync(fd);
+            self.UringUpdate(fd, epollfd)?;
         }
+        #[cfg(not(feature = "cc"))]
+        self.UpdateFDSync(fd)?;
+
+        Err(Error::IOError(String::from("Update FD: no valid handler")))
+
     }
 
     pub fn UringUpdate(&self, fd: i32, epollfd: i32) -> Result<()> {
@@ -292,6 +296,7 @@ impl FdWaitInfo {
         return Ok(());
     }
 
+    #[cfg(not(feature = "cc"))]
     pub fn UpdateFDSync(&self, fd: i32) -> Result<()> {
         let mask = {
             let fi = self.lock();
