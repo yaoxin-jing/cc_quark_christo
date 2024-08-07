@@ -35,6 +35,11 @@ use qlib::{linux_def::MemoryDef, common::Error, qmsg::qcall::{Print, QMsg},
     GetTimeCall, linux::time::Timespec, VcpuFeq,
     cpuid::XSAVEFeature::{XSAVEFeatureBNDREGS, XSAVEFeatureBNDCSR}};
 
+#[cfg(feature = "tdx")]
+use crate::qlib::cc::*;
+#[cfg(feature = "tdx")]
+use crate::qlib::common::CR4_MCE;
+
 pub struct X86_64VirtCpu {
     pub gtd_addr: u64,
     pub idt_addr: u64,
@@ -129,6 +134,30 @@ impl VirtCpu for X86_64VirtCpu {
             r9: self.vcpu_base.autoStart as u64,
             ..Default::default()
         };
+
+        #[cfg(feature = "tdx")]
+        {
+            let vm_regs_array = unsafe { &mut *(MemoryDef::VM_REGS_OFFSET as *mut VMRegsArray) };
+            let vm_regs = &mut vm_regs_array.vmRegsWrappers[self.vcpu_base.id].vmRegs;
+            vm_regs.rax = regs.rax;
+            vm_regs.rbx = regs.rbx;
+            vm_regs.rcx = regs.rcx;
+            vm_regs.rdx = regs.rdx;
+            vm_regs.rsi = regs.rsi;
+            vm_regs.rdi = regs.rdi;
+            vm_regs.rsp = regs.rsp;
+            vm_regs.rbp = regs.rbp;
+            vm_regs.r8 = regs.r8;
+            vm_regs.r9 = regs.r9;
+            vm_regs.r10 = regs.r10;
+            vm_regs.r11 = regs.r11;
+            vm_regs.r12 = regs.r12;
+            vm_regs.r13 = regs.r13;
+            vm_regs.r14 = regs.r14;
+            vm_regs.r15 = regs.r15;
+            vm_regs.rip = regs.rip;
+            vm_regs.rflags = regs.rflags;
+        }
 
         self.vcpu_base.vcpu_fd
             .set_regs(&regs)
@@ -415,6 +444,13 @@ impl X86_64VirtCpu {
         vcpu_sregs.cr4 = CR4_PSE | CR4_PAE | CR4_PGE | CR4_OSFXSR
             | CR4_OSXMMEXCPT | CR4_FSGSBASE | CR4_OSXSAVE;
 
+        #[cfg(feature = "tdx")]
+        {
+            if get_tee_type() == CCMode::TDX {
+                vcpu_sregs.cr4 |= CR4_MCE;
+            }
+        }
+
         vcpu_sregs.efer = EFER_LME | EFER_LMA | EFER_SCE | EFER_NX;
 
         vcpu_sregs.idt = kvm_bindings::kvm_dtable {
@@ -433,6 +469,17 @@ impl X86_64VirtCpu {
         self.vcpu_base.vcpu_fd
             .set_sregs(&vcpu_sregs)
             .map_err(|e| Error::IOError(format!("Set sregs failed - error:{:?}", e)))?;
+
+        #[cfg(feature = "tdx")]
+        {
+            let vm_regs_array = unsafe { &mut *(MemoryDef::VM_REGS_OFFSET as *mut VMRegsArray) };
+            let vm_regs = &mut vm_regs_array.vmRegsWrappers[self.vcpu_base.id].vmRegs;
+            vm_regs.cr0 = vcpu_sregs.cr0;
+            vm_regs.cr3 = vcpu_sregs.cr3;
+            vm_regs.cr4 = vcpu_sregs.cr4;
+            vm_regs.efer = vcpu_sregs.efer;
+        }
+
         Ok(())
     }
 
@@ -442,6 +489,22 @@ impl X86_64VirtCpu {
                 adjust_addr_to_host(self.gtd_addr, get_tee_type()) as *mut u64,
                 (MemoryDef::PAGE_SIZE / 8).try_into().expect("Failed to convert to usize"))
         };
+        #[cfg(feature = "tdx")]
+        {
+            if get_tee_type() == CCMode::TDX {
+                let vm_regs_array =
+                    unsafe { &mut *(MemoryDef::VM_REGS_OFFSET as *mut VMRegsArray) };
+                let vm_regs = &mut vm_regs_array.vmRegsWrappers[self.vcpu_base.id].vmRegs;
+                vm_regs.gdtaddr = self.gtd_addr;
+                vm_regs.tssaddr = self.tss_addr;
+                vm_regs.tssIntStackStart = self.tss_intr_stack_start;
+                assert!(
+                    core::mem::size_of::<VMRegsWrapper>() == 0x100,
+                    "VMRegsWrapper size error"
+                );
+                return Ok(());
+            }
+        }
         let KernelCodeSegment = SegmentDescriptor::default().SetCode64(0, 0, 0);
         let KernelDataSegment = SegmentDescriptor::default().SetData(0, 0xffffffff, 0);
         let _UserCodeSegment32 = SegmentDescriptor::default().SetCode64(0, 0, 3);

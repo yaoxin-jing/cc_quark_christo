@@ -201,6 +201,31 @@ impl HostAllocator {
             );
         }
     }
+
+    #[cfg(feature = "tdx")]
+    pub fn MapTDXSpecialPages(&self) {
+        let vm_paras_addr = unsafe {
+            let flags = libc::MAP_SHARED | libc::MAP_ANON | libc::MAP_FIXED;
+            libc::mmap(
+                MemoryDef::VM_REGS_OFFSET as _,
+                MemoryDef::PAGE_SIZE_2M as usize,
+                libc::PROT_READ | libc::PROT_WRITE,
+                flags,
+                -1,
+                0,
+            ) as u64
+        };
+        if vm_paras_addr == libc::MAP_FAILED as u64 {
+            panic!("mmap: failed to get mapped memory area for tdx vm para page");
+        }
+
+        assert!(
+            vm_paras_addr == MemoryDef::VM_REGS_OFFSET,
+            "VM para page expected address is {:x}, mmap address is {:x}",
+            MemoryDef::VM_REGS_OFFSET,
+            vm_paras_addr
+        );
+    }
 }
 
 unsafe impl GlobalAlloc for HostAllocator {

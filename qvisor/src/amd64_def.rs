@@ -158,6 +158,18 @@ impl SegmentDescriptor {
         )
     }
 
+    pub fn SetData32(self, base: u32, limit: u32, dpl: i32) -> Self {
+        self.Set(
+            base,
+            limit,
+            dpl,
+            SEGMENT_DESCRIPTOR_WRITE
+                | SEGMENT_DESCRIPTOR_SYSTEM
+                | SEGMENT_DESCRIPTOR_ACCESS
+                | SEGMENT_DESCRIPTOR_DB,
+        )
+    }
+
     pub fn SetHi(mut self, base: u32) -> Self {
         self.bits[0] = base;
         self.bits[1] = 0;

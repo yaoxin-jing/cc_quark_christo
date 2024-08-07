@@ -49,6 +49,7 @@ pub const CR0_PG: u64 = 1 << 31;
 
 pub const CR4_PSE: u64 = 1 << 4;
 pub const CR4_PAE: u64 = 1 << 5;
+pub const CR4_MCE: u64 = 1 << 6;
 pub const CR4_PGE: u64 = 1 << 7;
 pub const CR4_OSFXSR: u64 = 1 << 9;
 pub const CR4_OSXMMEXCPT: u64 = 1 << 10;
