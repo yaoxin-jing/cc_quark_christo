@@ -11,3 +11,9 @@ cuda_debug:
 
 cuda_release:
 	CARGO_TARGET_DIR=../target cargo +$(TOOLCHAIN) build --release --features cuda
+
+tdx_debug:
+	CARGO_TARGET_DIR=../target cargo +$(TOOLCHAIN) build --features tdx
+
+tdx_release:
+	CARGO_TARGET_DIR=../target cargo +$(TOOLCHAIN) build --release --features tdx

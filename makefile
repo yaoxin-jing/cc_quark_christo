@@ -17,6 +17,7 @@ QKERNEL_RELEASE = $(QKERNEL_BUILD)/qkernel.bin
 QUARK_DEBUG     = $(QTARGET_DEBUG)/quark
 QUARK_RELEASE   = $(QTARGET_RELEASE)/quark
 VDSO            = vdso/vdso.so
+TDSHIM          = td-shim/shim.bin
 
 ARCH := ${shell uname -m}
 RUST_TOOLCHAIN  = nightly-2023-12-11-$(ARCH)-unknown-linux-gnu
@@ -27,6 +28,8 @@ RUST_TOOLCHAIN  = nightly-2023-12-11-$(ARCH)-unknown-linux-gnu
 all:: release debug
 
 cuda_all:: cuda_release cuda_debug
+
+tdx_all:: tdx_release tdx_debug
 
 release:: qvisor_release qkernel_release $(VDSO)
 
@@ -70,6 +73,22 @@ qvisor_cuda_release:
 qvisor_cuda_debug:
 	make -C ./qvisor TOOLCHAIN=$(RUST_TOOLCHAIN) cuda_debug
 
+tdx_release:: qvisor_tdx_release qkernel_tdx_release $(VDSO) tdx_make
+
+tdx_debug:: qvisor_tdx_debug qkernel_tdx_debug $(VDSO) tdx_make
+
+qkernel_tdx_release:
+	make -C ./qkernel TOOLCHAIN=$(RUST_TOOLCHAIN) tdx_release
+
+qkernel_tdx_debug:
+	make -C ./qkernel TOOLCHAIN=$(RUST_TOOLCHAIN) tdx_debug
+
+qvisor_tdx_release:
+	make -C ./qvisor TOOLCHAIN=$(RUST_TOOLCHAIN) tdx_release
+
+qvisor_tdx_debug:
+	make -C ./qvisor TOOLCHAIN=$(RUST_TOOLCHAIN) tdx_debug
+
 install:
 	-sudo cp -f $(QKERNEL_RELEASE) $(QBIN_DIR)/
 	-sudo cp -f $(QUARK_RELEASE) $(QBIN_DIR)/quark
@@ -85,3 +104,8 @@ cuda_make:
 	make -C cudaproxy release
 	sudo cp -f $(QTARGET_RELEASE)/libcudaproxy.so $(QBIN_DIR)/libcudaproxy.so
 	sudo cp -f $(QTARGET_RELEASE)/libcudaproxy.so $(QROOT_DIR)/test
+
+tdx_make:
+	git submodule update --init --recursive
+	make -C td-shim quark_shim
+	sudo cp -f $(TDSHIM) $(QBIN_DIR)/shim.bin
