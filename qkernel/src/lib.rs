@@ -128,6 +128,21 @@ use self::syscalls::syscalls::*;
 use self::task::*;
 use self::threadmgr::task_sched::*;
 
+#[cfg(feature = "tdx")]
+use self::qlib::cc::tdx::{set_memory_shared_2mb, set_sbit_mask};
+#[cfg(feature = "tdx")]
+use self::qlib::cc::*;
+#[cfg(feature = "tdx")]
+use self::qlib::kernel::Kernel::{IS_INITIALIZED, IS_INITIALIZED_COUNTER};
+#[cfg(feature = "tdx")]
+use x86_64::instructions::tables::load_tss;
+#[cfg(feature = "tdx")]
+use x86_64::registers::segmentation::*;
+#[cfg(feature = "tdx")]
+use x86_64::structures::gdt::*;
+#[cfg(feature = "tdx")]
+use x86_64::structures::tss::*;
+
 use self::qlib::mem::cc_allocator::*;
 use alloc::boxed::Box;
 use memmgr::pma::PageMgr;
@@ -172,12 +187,64 @@ pub fn AllocIOBuf(size: usize) -> *mut u8 {
     }
 }
 
+#[cfg(feature = "tdx")]
+unsafe fn init_tss(gdt: &mut GlobalDescriptorTable, tssaddr: u64, tssIntStackStart: u64) {
+    use bit_field::BitField;
+    let stack_end = x86_64::VirtAddr::from_ptr(
+        (tssIntStackStart + MemoryDef::INTERRUPT_STACK_PAGES * MemoryDef::PAGE_SIZE) as *const u64,
+    );
+    let tssSegment = tssaddr as *mut x86_64::structures::tss::TaskStateSegment;
+    (*tssSegment).interrupt_stack_table[0] = stack_end;
+    (*tssSegment).iomap_base = -1 as i16 as u16;
+    let mut low = DescriptorFlags::PRESENT.bits();
+    // base
+    low.set_bits(16..40, tssaddr.get_bits(0..24));
+    low.set_bits(56..64, tssaddr.get_bits(24..32));
+    // limit
+    low.set_bits(0..16, (core::mem::size_of::<TaskStateSegment>() - 1) as u64);
+    // type
+    low.set_bits(40..44, 0b1001);
+
+    let mut high = 0;
+    high.set_bits(0..32, tssaddr.get_bits(32..64));
+
+    let tss_descriptor = Descriptor::SystemSegment(low, high);
+    let tss_segment_selector = gdt.add_entry(tss_descriptor);
+
+    gdt.load_unsafe();
+
+    load_tss(tss_segment_selector);
+}
+
+#[cfg(feature = "tdx")]
+pub unsafe fn init_gdt(vcpuid: u64) {
+    let vmRegs = &(*(MemoryDef::VM_REGS_OFFSET as *const VMRegsArray)).vmRegsWrappers
+        [vcpuid as usize]
+        .vmRegs;
+    let gdtAddr = vmRegs.gdtaddr;
+    let tssAddr = vmRegs.tssaddr;
+    let tssIntStackStart = vmRegs.tssIntStackStart;
+    let gdt = &mut *(gdtAddr as *mut GlobalDescriptorTable);
+    *gdt = GlobalDescriptorTable::new();
+    let kcode64 = gdt.add_entry(Descriptor::kernel_code_segment());
+    let kdata = gdt.add_entry(Descriptor::kernel_data_segment());
+    let udata = gdt.add_entry(Descriptor::user_data_segment());
+    let _ucode64 = gdt.add_entry(Descriptor::user_code_segment());
+    gdt.load_unsafe();
+    CS::set_reg(kcode64);
+    DS::set_reg(udata);
+    ES::set_reg(udata);
+    SS::set_reg(kdata);
+    FS::set_reg(udata);
+    GS::set_reg(udata);
+    init_tss(gdt, tssAddr, tssIntStackStart);
+}
+
 pub fn SingletonInit() {
     unsafe {
         vcpu::VCPU_COUNT.Init(AtomicUsize::new(0));
         vcpu::CPU_LOCAL.Init(&SHARESPACE.scheduler.VcpuArr);
         set_cpu_local(0);
-        KERNEL_PAGETABLE.Init(PageTables::Init(CurrentUserTable()));
         //init fp state with current fp state as it is brand new vcpu
         FP_STATE.Reset();
 
@@ -185,10 +252,16 @@ pub fn SingletonInit() {
         //error!("error message");
 
         if is_cc_active(){
-            PAGE_MGR.SetValue(PAGE_MGR_HOLDER.Addr());
+            if crate::qlib::kernel::arch::tee::get_tee_type() != CCMode::TDX {
+                KERNEL_PAGETABLE.Init(PageTables::Init(CurrentUserTable()));
+                interrupt::InitSingleton();
+                PAGE_MGR.SetValue(PAGE_MGR_HOLDER.Addr());
+            }
         } else {
+            KERNEL_PAGETABLE.Init(PageTables::Init(CurrentUserTable()));
             SHARESPACE.SetSignalHandlerAddr(SignalHandler as u64);
             PAGE_MGR.SetValue(SHARESPACE.GetPageMgrAddr());
+            interrupt::InitSingleton();
         }
         IOURING.SetValue(SHARESPACE.GetIOUringAddr());
         LOADER.Init(Loader::default());
@@ -212,7 +285,6 @@ pub fn SingletonInit() {
 
         fs::file::InitSingleton();
         fs::filesystems::InitSingleton();
-        interrupt::InitSingleton();
         kernel::futex::InitSingleton();
         kernel::semaphore::InitSingleton();
         kernel::epoll::epoll::InitSingleton();
@@ -624,6 +696,19 @@ fn InitLoader() {
     LOADER.InitKernel(process).unwrap();
 }
 
+#[cfg(feature = "tdx")]
+//Need to initialize PAGEMGR(pagepool for page allocator) and kernel page table in advance
+fn InitShareMemory() {
+    set_memory_shared_2mb(
+        VirtAddr::new(MemoryDef::FILE_MAP_OFFSET),
+        MemoryDef::FILE_MAP_SIZE / MemoryDef::PAGE_SIZE_2M,
+    );
+    set_memory_shared_2mb(
+        VirtAddr::new(MemoryDef::GUEST_HOST_SHARED_HEAP_OFFSET),
+        MemoryDef::GUEST_HOST_SHARED_HEAP_SIZE / MemoryDef::PAGE_SIZE_2M,
+    );
+}
+
 #[no_mangle]
 pub extern "C" fn rust_main(
     heapStart: u64,
@@ -637,6 +722,25 @@ pub extern "C" fn rust_main(
     if id == 0 {
         //if in any cc machine, shareSpaceAddr is reused as CCMode
         let mode = CCMode::from(shareSpaceAddr);
+        #[cfg(feature = "tdx")]
+        if mode == CCMode::TDX {
+            //Memory is accpeted in firmware
+            /*tdx_tdcall::tdx::td_accept_memory(
+                MemoryDef::PHY_LOWER_ADDR,
+                MemoryDef::IO_HEAP_END - MemoryDef::PHY_LOWER_ADDR,
+            );*/
+            GLOBAL_ALLOCATOR.SwitchToPrivateRunningHeap();
+            unsafe {
+                KERNEL_PAGETABLE.Init(PageTables::Init(CurrentKernelTable()));
+                init_gdt(id);
+                interrupt::InitSingleton();
+            }
+            interrupt::init();
+            set_sbit_mask();
+            PAGE_MGR.SetValue(PAGE_MGR_HOLDER.Addr());
+            //Tdcall convert shared memory
+            InitShareMemory();
+        }
         GLOBAL_ALLOCATOR.InitPrivateAllocator(mode);
         if mode != CCMode::None {
             crate::qlib::kernel::arch::tee::set_tee_type(mode);
@@ -680,10 +784,26 @@ pub extern "C" fn rust_main(
         // release other vcpus
         HyperCall64(qlib::HYPERCALL_RELEASE_VCPU, 0, 0, 0, 0);
     } else {
+        #[cfg(feature = "tdx")]
+        if CCMode::from(shareSpaceAddr) == CCMode::TDX {
+            unsafe {
+                init_gdt(id);
+            }
+        }
+        interrupt::init();
         set_cpu_local(id);
         //PerfGoto(PerfType::Kernel);
     }
-
+    let initialized_num = IS_INITIALIZED_COUNTER.fetch_add(1, Ordering::Release);
+    if initialized_num + 1 == vcpuCnt {
+        IS_INITIALIZED.store(true, Ordering::Release);
+    }
+    if IS_INITIALIZED.load(Ordering::Acquire) {
+        use crate::qlib::addr::Addr;
+        KERNEL_PAGETABLE
+            .UnmapWith1G(Addr(0), Addr(8 * MemoryDef::ONE_GB), &*PAGE_MGR)
+            .expect("Failed to unmap firmware address!");
+    }
     SHARESPACE.IncrVcpuSearching();
     taskMgr::AddNewCpu();
 
@@ -696,8 +816,6 @@ pub extern "C" fn rust_main(
     {
         RegisterExceptionTable(vector_table as u64);
     }
-
-    interrupt::init();
 
     /***************** can't run any qcall before this point ************************************/
 

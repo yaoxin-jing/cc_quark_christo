@@ -21,9 +21,9 @@ use core::sync::atomic::Ordering;
 
 use crate::qlib::fileinfo::*;
 
+use self::kernel::dns::dns_svc::DnsSvc;
 use self::kernel::socket::hostinet::tsot_mgr::TsotSocketMgr;
 use self::tsot_msg::TsotMessage;
-use self::kernel::dns::dns_svc::DnsSvc;
 use super::qlib::kernel::asm::*;
 use super::qlib::kernel::quring::uring_async::UringAsyncMgr;
 use super::qlib::kernel::taskMgr::*;
@@ -50,16 +50,15 @@ use super::qlib::*;
 use super::syscalls::sys_file::*;
 use super::Kernel::HostSpace;
 
-
 use crate::GLOBAL_ALLOCATOR;
 
-use crate::PRIVATE_VCPU_ALLOCATOR;
-use crate::PRIVATE_VCPU_SHARED_ALLOCATOR;
 use super::qlib::qmsg::sharepara::*;
+use crate::qlib::config::CCMode;
 use crate::qlib::kernel::arch::tee::is_cc_active;
 use crate::GUEST_HOST_SHARED_ALLOCATOR;
+use crate::PRIVATE_VCPU_ALLOCATOR;
+use crate::PRIVATE_VCPU_SHARED_ALLOCATOR;
 use alloc::boxed::Box;
-use crate::qlib::config::CCMode;
 
 impl OOMHandler for ListAllocator {
     fn handleError(&self, size: u64, alignment: u64) {
@@ -228,9 +227,7 @@ pub fn Invlpg(addr: u64) {
 #[inline(always)]
 fn _hcall_prepare_shared_buff(vcpu_id: usize, arg0: u64, arg1: u64, arg2: u64, arg3: u64) {
     let shared_buff_addr = MemoryDef::HYPERCALL_PARA_PAGE_OFFSET as *mut ShareParaPage;
-    let shared_buff = unsafe {
-        &mut (*shared_buff_addr).SharePara[vcpu_id]
-    };
+    let shared_buff = unsafe { &mut (*shared_buff_addr).SharePara[vcpu_id] };
 
     shared_buff.para1 = arg0;
     shared_buff.para2 = arg1;
@@ -260,7 +257,7 @@ pub fn HyperCall64(type_: u16, para1: u64, para2: u64, para3: u64, para4: u64) {
         let vcpu_id = if type_ != crate::qlib::HYPERCALL_SHARESPACE_INIT {
             GetVcpuId()
         } else {
-             0
+            0
         };
         _hcall_prepare_shared_buff(vcpu_id, para1, para2, para3, para4);
         let dummy_data: u8 = 0;
@@ -299,7 +296,7 @@ pub fn HyperCall64(type_: u16, para1: u64, para2: u64, para3: u64, para4: u64) {
         let vcpu_id = if type_ != crate::qlib::HYPERCALL_SHARESPACE_INIT {
             GetVcpuId()
         } else {
-             0
+            0
         };
         _hcall_prepare_shared_buff(vcpu_id, para1, para2, para3, para4);
         let dummy_data: u8 = 0;
@@ -500,6 +497,23 @@ impl HostAllocator {
         }
     }
 
+    pub fn SwitchToPrivateRunningHeap(&self) {
+        self.guestPrivHeapAddr.store(
+            MemoryDef::GUEST_PRIVATE_RUNNING_HEAP_OFFSET,
+            Ordering::SeqCst,
+        );
+        *self.GuestPrivateAllocator() = ListAllocator::New(
+            MemoryDef::GUEST_PRIVATE_RUNNING_HEAP_OFFSET,
+            MemoryDef::GUEST_PRIVATE_RUNNING_HEAP_OFFSET
+                + MemoryDef::GUEST_PRIVATE_RUNNING_HEAP_SIZE,
+        );
+        let size = core::mem::size_of::<ListAllocator>();
+        self.GuestPrivateAllocator().Add(
+            MemoryDef::GUEST_PRIVATE_RUNNING_HEAP_OFFSET as usize + size,
+            MemoryDef::GUEST_PRIVATE_RUNNING_HEAP_SIZE as usize - size,
+        );
+    }
+
     pub fn InitSharedAllocator(&self, mode: CCMode) {
         match mode {
             CCMode::None => self
@@ -583,7 +597,7 @@ unsafe impl GlobalAlloc for GlobalVcpuAllocator {
         if !self.init.load(Ordering::Acquire) {
             return GLOBAL_ALLOCATOR.alloc(layout);
         }
-        if is_cc_active(){
+        if is_cc_active() {
             return PRIVATE_VCPU_ALLOCATOR.AllocatorMut().alloc(layout);
         } else {
             return CPU_LOCAL[VcpuId()].AllocatorMut().alloc(layout);
@@ -598,7 +612,7 @@ unsafe impl GlobalAlloc for GlobalVcpuAllocator {
         if !self.init.load(Ordering::Relaxed) {
             return GLOBAL_ALLOCATOR.dealloc(ptr, layout);
         }
-        if is_cc_active(){
+        if is_cc_active() {
             return PRIVATE_VCPU_ALLOCATOR.AllocatorMut().dealloc(ptr, layout);
         } else {
             return CPU_LOCAL[VcpuId()].AllocatorMut().dealloc(ptr, layout);
@@ -611,13 +625,13 @@ use core::ptr::NonNull;
 
 unsafe impl core::alloc::Allocator for GuestHostSharedAllocator {
     fn allocate(&self, layout: Layout) -> core::result::Result<NonNull<[u8]>, AllocError> {
-        unsafe{
+        unsafe {
             if !GUEST_HOST_SHARED_ALLOCATOR_INIT.load(Ordering::Acquire) {
                 let ptr = GLOBAL_ALLOCATOR.AllocSharedBuf(layout.size(), layout.align());
                 let slice = core::slice::from_raw_parts_mut(ptr, layout.size());
                 return Ok(NonNull::new_unchecked(slice));
             }
-            if is_cc_active(){
+            if is_cc_active() {
                 let ptr = PRIVATE_VCPU_SHARED_ALLOCATOR.AllocatorMut().alloc(layout);
                 let slice = core::slice::from_raw_parts_mut(ptr, layout.size());
                 return Ok(NonNull::new_unchecked(slice));
@@ -631,15 +645,17 @@ unsafe impl core::alloc::Allocator for GuestHostSharedAllocator {
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         let ptr = ptr.as_ptr();
-        if !HostAllocator::IsHeapAddr( ptr as u64) {
+        if !HostAllocator::IsHeapAddr(ptr as u64) {
             return GLOBAL_ALLOCATOR.dealloc(ptr, layout);
         }
 
         if !GUEST_HOST_SHARED_ALLOCATOR_INIT.load(Ordering::Relaxed) {
             return GLOBAL_ALLOCATOR.dealloc(ptr, layout);
         }
-        if is_cc_active(){
-            return PRIVATE_VCPU_SHARED_ALLOCATOR.AllocatorMut().dealloc(ptr, layout);
+        if is_cc_active() {
+            return PRIVATE_VCPU_SHARED_ALLOCATOR
+                .AllocatorMut()
+                .dealloc(ptr, layout);
         } else {
             return CPU_LOCAL[VcpuId()].AllocatorMut().dealloc(ptr, layout);
         }
@@ -672,9 +688,9 @@ pub fn ReapSwapIn() {
 
 impl TsotSocketMgr {
     pub fn SendMsg(m: &TsotMessage) -> Result<()> {
-        let res = HostSpace::TsotSendMsg(m as * const _ as u64);
+        let res = HostSpace::TsotSendMsg(m as *const _ as u64);
         if res == 0 {
-            return Ok(())
+            return Ok(());
         }
 
         return Err(Error::SysError(SysErr::EINVAL));
@@ -682,9 +698,9 @@ impl TsotSocketMgr {
 
     pub fn RecvMsg() -> Result<TsotMessage> {
         let mut m = Box::new_in(TsotMessage::default(), GUEST_HOST_SHARED_ALLOCATOR);
-        let res = HostSpace::TsotRecvMsg(&mut *m as * mut _ as u64);
+        let res = HostSpace::TsotRecvMsg(&mut *m as *mut _ as u64);
         if res == 0 {
-            return Ok(*m)
+            return Ok(*m);
         }
 
         return Err(Error::SysError(SysErr::EINVAL));

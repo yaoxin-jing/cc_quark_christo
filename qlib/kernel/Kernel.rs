@@ -30,6 +30,8 @@ use crate::GUEST_HOST_SHARED_ALLOCATOR;
 
 pub static IDENTICAL_MAPPING: AtomicBool = AtomicBool::new(true);
 #[cfg (feature = "tdx")]
+pub static IS_INITIALIZED_COUNTER: AtomicU64 = AtomicU64::new(0);
+#[cfg (feature = "tdx")]
 pub static IS_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 extern "C" {
