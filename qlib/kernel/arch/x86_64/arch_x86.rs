@@ -174,8 +174,11 @@ impl X86fpstate {
     pub const MXCSR_MASK_OFFSET: usize = 28;
 
     fn New() -> Self {
-        let (size, _align) = HostFeatureSet().ExtendedStateSize();
+        let (mut size, _align) = HostFeatureSet().ExtendedStateSize();
 
+        if size > 0x2000 {
+            size -= 0x2000;
+        }
         if size > 4096 {
             panic!("X86fpstate capacity size({}) > 4096", size);
         }
