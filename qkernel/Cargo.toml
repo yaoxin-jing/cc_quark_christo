@@ -22,7 +22,9 @@ enum_dispatch = { git = "https://github.com/QuarkContainer/enum_dispatch_clone.g
 log = { version = "0.4", features = ["max_level_trace", "release_max_level_trace"] }
 
 [features]
+default = ["duck-qk"]
 cc = []
+duck-qk = []
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "0.14.7"
