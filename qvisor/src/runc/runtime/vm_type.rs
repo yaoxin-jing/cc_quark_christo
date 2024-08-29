@@ -15,6 +15,8 @@
 
 pub mod noncc;
 pub mod emulcc;
+#[cfg(feature = "tdx")]
+pub mod tdx;
 pub mod resources;
 
 use std::sync::Arc;
