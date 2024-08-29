@@ -1,0 +1,4 @@
+[submodule "td-shim"]
+	path = td-shim
+	url = https://github.com/123abcpp/td-shim.git
+	branch = quark
