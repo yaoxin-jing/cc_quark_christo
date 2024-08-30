@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod emulcc;
+pub mod tdx;
 
 use kvm_ioctls::{VcpuExit, VcpuFd};
 

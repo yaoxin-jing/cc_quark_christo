@@ -3104,9 +3104,12 @@ impl MemoryDef {
 #[cfg(feature = "tdx")]
 impl MemoryDef {
     pub const TDVF_OFFSET: u64 = 0xff00_0000;
+    pub const TDVF_SIZE: u64 = 16 * Self::ONE_MB;
     pub const VM_REGS_OFFSET: u64 = Self::RDMA_GLOBAL_SHARE_OFFSET + Self::RDMA_GLOBAL_SHARE_SIZE;
     pub const VM_REGS_SIZE: u64 = Self::PAGE_SIZE_2M;
     pub const FILE_MAP_OFFSET: u64 = Self::VM_REGS_OFFSET + Self::VM_REGS_SIZE;
+    pub const SHIM_MEMORY_BASE: u64 = 0x0;
+    pub const SHIM_MEMORY_SIZE: u64 = 2 * Self::ONE_GB;
 }
 //mmap prot
 pub struct MmapProt {}

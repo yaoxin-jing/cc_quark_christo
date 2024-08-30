@@ -55,6 +55,7 @@ extern crate regex;
 extern crate simplelog;
 extern crate spin;
 extern crate tabwriter;
+extern crate tdx;
 
 #[macro_use]
 pub mod print;

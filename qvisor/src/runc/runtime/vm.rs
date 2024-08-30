@@ -29,7 +29,7 @@ use crate::qlib::kernel::arch::tee::get_tee_type;
 use crate::qlib::MAX_VCPU_COUNT;
 use crate::runc::runtime::vm_type::emulcc::VmCcEmul;
 #[cfg(feature = "tdx")]
-use crate::runc::runtime::vm_type::tdx::TDX;
+use crate::runc::runtime::vm_type::tdx::VmTDX;
 
 use super::super::super::elf_loader::*;
 use super::super::super::kvm_vcpu::*;
@@ -138,7 +138,7 @@ impl VirtualMachine {
             CCMode::Normal | CCMode::NormalEmu =>
                 VmCcEmul::init(Some(&args))?,
             #[cfg(feature = "tdx")]
-            CCMode::TDX => TDX::init(Some(&args))?,
+            CCMode::TDX => VmTDX::init(Some(&args))?,
             _ => panic!("Unhandled type."),
         };
         let umask = Self::Umask();
