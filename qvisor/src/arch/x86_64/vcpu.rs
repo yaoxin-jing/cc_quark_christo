@@ -68,7 +68,12 @@ impl VirtCpu for X86_64VirtCpu {
         let mut error_msg = String::new();
         if let Ok(supported_cpuid) = kvm.unwrap().get_supported_cpuid(KVM_MAX_CPUID_ENTRIES)
             .map_err(|e| error_msg = format!("Failed to get supported cpuid with err:{:?}", e)) {
+            #[cfg(not(feature = "tdx"))]
             _vcpu_fd.set_cpuid2(&supported_cpuid).unwrap();
+            #[cfg(feature = "tdx")]
+            if get_tee_type() != CCMode::TDX {
+                _vcpu_fd.set_cpuid2(&supported_cpuid).unwrap();
+            }
         } else {
             return Err(Error::IOError(error_msg));
         }
@@ -163,6 +168,9 @@ impl VirtCpu for X86_64VirtCpu {
             vm_regs.r15 = regs.r15;
             vm_regs.rip = regs.rip;
             vm_regs.rflags = regs.rflags;
+            if get_tee_type() == CCMode::TDX {
+                return Ok(());
+            }
         }
 
         self.vcpu_base.vcpu_fd
@@ -472,20 +480,23 @@ impl X86_64VirtCpu {
         };
 
         let _ = self.setup_gdt(&mut vcpu_sregs);
-        self.vcpu_base.vcpu_fd
-            .set_sregs(&vcpu_sregs)
-            .map_err(|e| Error::IOError(format!("Set sregs failed - error:{:?}", e)))?;
 
         #[cfg(feature = "tdx")]
         {
-            let vm_regs_array = unsafe { &mut *(MemoryDef::VM_REGS_OFFSET as *mut VMRegsArray) };
-            let vm_regs = &mut vm_regs_array.vmRegsWrappers[self.vcpu_base.id].vmRegs;
-            vm_regs.cr0 = vcpu_sregs.cr0;
-            vm_regs.cr3 = vcpu_sregs.cr3;
-            vm_regs.cr4 = vcpu_sregs.cr4;
-            vm_regs.efer = vcpu_sregs.efer;
+            if get_tee_type() == CCMode::TDX {
+                let vm_regs_array = unsafe { &mut *(MemoryDef::VM_REGS_OFFSET as *mut VMRegsArray) };
+                let vm_regs = &mut vm_regs_array.vmRegsWrappers[self.vcpu_base.id].vmRegs;
+                vm_regs.cr0 = vcpu_sregs.cr0;
+                vm_regs.cr3 = vcpu_sregs.cr3;
+                vm_regs.cr4 = vcpu_sregs.cr4;
+                vm_regs.efer = vcpu_sregs.efer;
+                return Ok(());
+            }
         }
 
+        self.vcpu_base.vcpu_fd
+            .set_sregs(&vcpu_sregs)
+            .map_err(|e| Error::IOError(format!("Set sregs failed - error:{:?}", e)))?;
         Ok(())
     }
 

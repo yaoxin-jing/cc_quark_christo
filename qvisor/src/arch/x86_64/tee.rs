@@ -58,18 +58,12 @@ impl EmulCc<'_> {
 
 #[cfg(feature = "tdx")]
 impl Tdx<'_> {
-    pub(in crate::arch) fn _set_cpu_registers(&self, vcpu_fd: &kvm_ioctls::VcpuFd, vcpu_id: usize) -> Result<(), Error> {
+    pub(in crate::arch) fn _set_cpu_registers(&self, _vcpu_fd: &kvm_ioctls::VcpuFd, vcpu_id: usize) -> Result<(), Error> {
         use crate::qlib::cc::*;
         use crate::qlib::linux_def::MemoryDef;
         let vm_regs_array = unsafe { &mut *(MemoryDef::VM_REGS_OFFSET as *mut VMRegsArray) };
         let vm_regs = &mut vm_regs_array.vmRegsWrappers[vcpu_id].vmRegs;
-        let mut cpu_regs = vcpu_fd.get_regs().unwrap();
         //arg0
-        cpu_regs.rdi = self.page_allocator_addr;
-        //arg1
-        cpu_regs.rsi = self.cc_mode as u64;
-        vcpu_fd.set_regs(&cpu_regs)
-            .expect("vCPU - failed to set up cpu registers.");
         vm_regs.rdi = self.page_allocator_addr;
         //arg1
         vm_regs.rsi = self.cc_mode as u64;
