@@ -32,7 +32,7 @@ const KVM_MEMORY_ATTRIBUTE_PRIVATE: u64 = 1 << 3;
 
 pub struct Tdx<'a> {
     kvm_exits_list: [VcpuExit<'a>; 2],
-    hypercalls_list: [u16; 3],
+    hypercalls_list: [u16; 2],
     pub cc_mode: CCMode,
     pub share_space_table_addr: Option<u64>,
     pub page_allocator_addr: u64,
@@ -54,7 +54,6 @@ impl ConfCompExtension for Tdx<'_> {
             ],
             hypercalls_list: [
                 qlib::HYPERCALL_SHARESPACE_INIT,
-                qlib::HYPERCALL_DEBUG_OUTPUT,
                 qlib::HYPERCALL_WAIT_BSP_INIT,
             ],
             cc_mode: CCMode::TDX,
@@ -124,6 +123,9 @@ impl ConfCompExtension for Tdx<'_> {
             qlib::HYPERCALL_SHARESPACE_INIT => {
                 self._handle_hcall_shared_space_init(arg0, arg1, arg2, arg3, vcpu_id)?
             }
+            qlib::HYPERCALL_WAIT_BSP_INIT => {
+                self._handle_wait_bsp_init(arg0, arg1, arg2, arg3, vcpu_id)?
+            }
             _ => false,
         };
 
@@ -188,6 +190,21 @@ impl Tdx<'_> {
 
         Ok(false)
     }
+
+    pub(self) fn _handle_wait_bsp_init(
+        &self,
+        _arg0: u64,
+        _arg1: u64,
+        _arg2: u64,
+        _arg3: u64,
+        vcpu_id: usize,
+    ) -> Result<bool, Error> {
+        info!("cpu {:x} is waiting for the bsp", vcpu_id);
+        crate::syncmgr::SyncMgr::WaitShareSpaceReady();
+        info!("cpu {:x} returns to the guest", vcpu_id);
+        Ok(false)
+    }
+
     pub(self) fn _handle_tdx_exit(&self, exit: &mut TDXExit, vm_fd: &VmFd) -> Result<bool, Error> {
         use crate::qlib::cc::tdx::S_BIT_MASK;
         const TDG_VP_VMCALL_SUCCESS: u64 = 0x0000000000000000;
