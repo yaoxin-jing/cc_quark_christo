@@ -12,21 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
+use core::sync::atomic::Ordering;
 
 use crate::qlib::linux_def::MemoryDef;
-use crate::runc::runtime::vm::VirtualMachine;
 use crate::runc::runtime::vm_type::tdx::VmTDX;
 use crate::runc::runtime::vm_type::VmType;
 //#[cfg(feature = "cc")]
 use crate::arch::vm::vcpu::kvm_vcpu::Register;
 use crate::sharepara::ShareParaPage;
 use crate::VMS;
-use crate::{arch::ConfCompExtension, qlib, QUARK_CONFIG};
+use crate::{arch::ConfCompExtension, qlib};
 use kvm_ioctls::{VcpuExit, VmFd};
 use qlib::common::Error;
 use qlib::config::CCMode;
 static mut DUMMY_U64: u64 = 0u64;
+use kvm_bindings::kvm_memory_attributes;
+use kvm_ioctls::TDXExit;
+const KVM_MEMORY_ATTRIBUTE_PRIVATE: u64 = 1 << 3;
 
 pub struct Tdx<'a> {
     kvm_exits_list: [VcpuExit<'a>; 2],
@@ -94,10 +96,18 @@ impl ConfCompExtension for Tdx<'_> {
     fn handle_kvm_exit(
         &self,
         kvm_exit: &mut kvm_ioctls::VcpuExit,
-        vcpu_id: usize,
+        _vcpu_id: usize,
         vm_fd: Option<&VmFd>,
     ) -> Result<bool, crate::qlib::common::Error> {
-        todo!()
+        let mut _exit = false;
+        _exit = match kvm_exit {
+            VcpuExit::TDXExit(exit) => self._handle_tdx_exit(exit, vm_fd.unwrap())?,
+            VcpuExit::MemoryFault(gpa, size, private) => {
+                self._handle_memory_fault(*gpa, *size, *private, vm_fd.unwrap())?
+            }
+            _ => false,
+        };
+        Ok(_exit)
     }
 
     fn handle_hypercall(
@@ -146,10 +156,10 @@ impl Tdx<'_> {
     pub(self) fn _handle_hcall_shared_space_init(
         &self,
         arg0: u64,
-        arg1: u64,
-        arg2: u64,
-        arg3: u64,
-        vcpu_id: usize,
+        _arg1: u64,
+        _arg2: u64,
+        _arg3: u64,
+        _vcpu_id: usize,
     ) -> Result<bool, Error> {
         let ctrl_sock: i32;
         let vcpu_count: usize;
@@ -176,6 +186,90 @@ impl Tdx<'_> {
             info!("Vcpu: finished shared-space initialization.");
         }
 
+        Ok(false)
+    }
+    pub(self) fn _handle_tdx_exit(&self, exit: &mut TDXExit, vm_fd: &VmFd) -> Result<bool, Error> {
+        use crate::qlib::cc::tdx::S_BIT_MASK;
+        const TDG_VP_VMCALL_SUCCESS: u64 = 0x0000000000000000;
+        const TDG_VP_VMCALL_RETRY: u64 = 0x0000000000000001;
+        const TDG_VP_VMCALL_INVALID_OPERAND: u64 = 0x8000000000000000;
+        const TDG_VP_VMCALL_ALIGN_ERROR: u64 = 0x8000000000000002;
+        match exit {
+            TDXExit::MapGpa(in_r12, in_r13, status_code) => {
+                let in_r12 = *in_r12;
+                let in_r13 = *in_r13;
+                info!("TDXExit::MapGpa");
+                let shared_bit = S_BIT_MASK.load(Ordering::Acquire);
+                let addr_mask = (shared_bit << 1) - 1;
+                let gpa = in_r12 & !shared_bit;
+                let private = (in_r12 & shared_bit) == 0;
+                let size = in_r13;
+                **status_code = TDG_VP_VMCALL_INVALID_OPERAND;
+
+                let mut attr = Some(kvm_memory_attributes {
+                    address: gpa,
+                    size: size,
+                    attributes: if private {
+                        KVM_MEMORY_ATTRIBUTE_PRIVATE
+                    } else {
+                        0
+                    },
+                    flags: 0,
+                });
+
+                if gpa & !addr_mask > 0 {
+                    error!("Invalid gpa!");
+                    attr = None;
+                }
+
+                if !(gpa % 4096 == 0) || !(size % 4096 == 0) {
+                    **status_code = TDG_VP_VMCALL_ALIGN_ERROR;
+                    error!("gpa alignment error!");
+                    attr = None;
+                }
+
+                if size > 0 && attr.is_some() {
+                    let attr_inner = attr.unwrap();
+                    info!(
+                        "Converting memory: gpa:0x{:x}, size:0x{:x}, from shared to private:{:?}",
+                        attr_inner.address,
+                        attr_inner.size,
+                        attr_inner.attributes > 0
+                    );
+                    vm_fd
+                        .set_memory_attributes(&attr_inner)
+                        .expect("Unable to convert memory to private");
+                    **status_code = TDG_VP_VMCALL_SUCCESS;
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    pub(self) fn _handle_memory_fault(
+        &self,
+        gpa: u64,
+        size: u64,
+        private: bool,
+        vm_fd: &VmFd,
+    ) -> Result<bool, Error> {
+        info!(
+            "VcpuExit::MemoryFault gpa:{:x}, size:{:x}, private:{}",
+            gpa, size, private
+        );
+        let attr = kvm_memory_attributes {
+            address: gpa,
+            size: size,
+            attributes: if private {
+                KVM_MEMORY_ATTRIBUTE_PRIVATE
+            } else {
+                0
+            },
+            flags: 0,
+        };
+        vm_fd
+            .set_memory_attributes(&attr)
+            .expect("Unable to convert memory to private");
         Ok(false)
     }
 }

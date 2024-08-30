@@ -95,7 +95,8 @@ impl VirtCpu for X86_64VirtCpu {
                 page_allocator_base_addr)?,
             #[cfg(feature = "tdx")]
             CCMode::TDX => 
-                Tdx::initialize_conf_extension(share_space_table_addr, page_allocator_base_addr)?,
+                Tdx::initialize_conf_extension(share_space_table_addr,
+                page_allocator_base_addr)?,
             _ => {
                 return Err(Error::InvalidArgument("Create vcpu failed - bad CCMode type"
                     .to_string()));

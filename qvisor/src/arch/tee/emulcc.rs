@@ -62,11 +62,7 @@ impl ConfCompExtension for EmulCc<'_> {
     }
 
     fn should_handle_hypercall(&self, hypercall: u16) -> bool {
-        if hypercall == self.hypercalls_list[0] {
-            true
-        } else {
-            false
-        }
+        self.hypercalls_list.contains(&hypercall)
     }
 
     fn handle_hypercall(&self, hypercall: u16, arg0: u64, arg1: u64, arg2: u64,

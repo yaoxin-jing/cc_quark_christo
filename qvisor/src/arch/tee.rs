@@ -20,7 +20,6 @@ use kvm_ioctls::{VcpuExit, VcpuFd};
 use super::{ConfCompExtension, vm::vcpu::kvm_vcpu::Register};
 use crate::{qlib::common::Error, CCMode};
 
-
 pub struct NonConf<'a> {
     kvm_exits_list: Option<[VcpuExit<'a>; 0]>,
     hypercalls_list: Option<[u16; 0]>,
@@ -30,15 +29,17 @@ pub struct NonConf<'a> {
 }
 
 impl ConfCompExtension for NonConf<'_> {
-    fn initialize_conf_extension(_share_space_addr: Option<u64>, _page_allocator: Option<u64>)
-        -> Result<Box<dyn ConfCompExtension>, Error>
+    fn initialize_conf_extension(
+        _share_space_table_addr: Option<u64>,
+        _page_allocator_base_addr: Option<u64>,
+    ) -> Result<Box<dyn ConfCompExtension>, crate::qlib::common::Error>
         where Self: Sized {
         let _self: Box<dyn ConfCompExtension> = Box::new(NonConf{
             kvm_exits_list: None,
             hypercalls_list: None,
-            share_space_table_addr: _share_space_addr
+            share_space_table_addr: _share_space_table_addr
                 .expect("Exptected base address of the share space - found None"),
-            page_allocator_addr: _page_allocator
+            page_allocator_addr: _page_allocator_base_addr
                 .expect("Exptected address of the page allocator - found None"),
             cc_mode: CCMode::None,
         });
