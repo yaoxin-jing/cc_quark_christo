@@ -74,7 +74,7 @@ pub mod util {
     #[inline]
     pub fn get_offset(confidentiality_type: CCMode) -> u64 {
         let offset = match confidentiality_type {
-            CCMode::None | CCMode::Normal =>
+            CCMode::None | CCMode::Normal | CCMode::TDX=>
                 0,
             CCMode::NormalEmu =>
                 MemoryDef::UNIDENTICAL_MAPPING_OFFSET,
