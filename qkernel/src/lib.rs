@@ -781,6 +781,12 @@ pub extern "C" fn rust_main(
         VDSO.Initialization(vdsoParamAddr);
         debug!("init vdso finished");
 
+        #[cfg(feature = "tdx")]
+        if crate::qlib::kernel::arch::tee::get_tee_type() == CCMode::TDX {
+            let additional_data = [0u8; 64];
+            let report = tdx_tdcall::tdreport::tdcall_report(&additional_data).unwrap();
+            info!("{:#x?}", report);
+        }
         // release other vcpus
         HyperCall64(qlib::HYPERCALL_RELEASE_VCPU, 0, 0, 0, 0);
     } else {
