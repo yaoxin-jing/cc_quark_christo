@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::super::vm::VirtualMachine;
+use super::resources::MemAreaType;
 use super::{resources::{MemArea, MemLayoutConfig, VmResources}, VmType};
 use crate::arch::{VirtCpu, vm::vcpu::ArchVirtCpu};
 use crate::qlib::kernel::{vcpu, IOURING, KERNEL_PAGETABLE, PAGE_MGR};
@@ -21,6 +22,7 @@ use crate::{elf_loader::KernelELF, print::LOG, qlib, runc::runtime, tsot_agent::
             vmspace::VMSpace, KERNEL_IO_THREAD, PMA_KEEPER, QUARK_CONFIG, ROOT_CONTAINER_ID,
             SHARE_SPACE, SHARE_SPACE_STRUCT, URING_MGR, VMS};
 use addr::{Addr, PageOpts};
+use hashbrown::HashMap;
 use kernel::{kernel::futex, kernel::timer, task, KERNEL_STACK_ALLOCATOR, SHARESPACE};
 use kvm_bindings::kvm_enable_cap;
 use kvm_ioctls::{Cap, Kvm, VmFd};
@@ -33,8 +35,8 @@ use std::os::fd::FromRawFd;
 use std::sync::Arc;
 
 #[cfg(target_arch = "aarch64")]
-use MemArea::HypercallMmioArea;
-use MemArea::{FileMapArea, KernelArea, SharedHeapArea};
+use MemAreaType::HypercallMmioArea;
+use MemAreaType::{FileMapArea, KernelArea, SharedHeapArea};
 
 pub struct VmNormal {
     vm_resources: VmResources,
@@ -54,24 +56,48 @@ impl VmType for VmNormal {
     fn init(args: Option<&Args>) -> Result<(Box<dyn VmType>, KernelELF), Error> {
         let _pod_id = args.expect("VM creation expects arguments").ID.clone();
         let default_min_vcpus = 2;
+        let mut _hshared_map:HashMap<MemAreaType, MemArea> = HashMap::new();
+        _hshared_map.insert(
+            MemAreaType::SharedHeapArea,
+            MemArea{
+                base_host: MemoryDef::HEAP_OFFSET,
+                base_guest: MemoryDef::HEAP_OFFSET,
+                size: MemoryDef::HEAP_SIZE,
+                kvm_memory_region: None,
+            });
+        _hshared_map.insert(
+            MemAreaType::KernelArea,
+            MemArea {
+                base_host: MemoryDef::PHY_LOWER_ADDR,
+                base_guest: MemoryDef::PHY_LOWER_ADDR,
+                // Kernel Image + RDMA
+                size: MemoryDef::FILE_MAP_OFFSET - MemoryDef::PHY_LOWER_ADDR,
+                kvm_memory_region: None,
+            });
+        _hshared_map.insert(
+            MemAreaType::FileMapArea,
+            MemArea {
+                base_host: MemoryDef::FILE_MAP_OFFSET,
+                base_guest: MemoryDef::FILE_MAP_OFFSET,
+                size: MemoryDef::FILE_MAP_SIZE,
+                kvm_memory_region: None
+            });
+        #[cfg(target_arch = "aarch64")] {
+            _hshared_map.insert(
+                MemAreaType::HypercallMmioArea,
+                MemArea {
+                    base_host: u64::MAX,
+                    base_guest: MemoryDef::HYPERCALL_MMIO_BASE,
+                    size: MemoryDef::HYPERCALL_MMIO_SIZE,
+                    kvm_memory_region: None,
+                });
+        }
         let mem_layout_config = MemLayoutConfig {
-            shared_heap_mem_base_host: MemoryDef::HEAP_OFFSET,
-            shared_heap_mem_base_guest: MemoryDef::HEAP_OFFSET,
-            shared_heap_mem_size: MemoryDef::HEAP_SIZE,
-            kernel_base_host: MemoryDef::PHY_LOWER_ADDR,
-            kernel_base_guest: MemoryDef::PHY_LOWER_ADDR,
-            kernel_init_region_size: MemoryDef::KERNEL_MEM_INIT_REGION_SIZE * MemoryDef::ONE_GB,
-            file_map_area_base_host: MemoryDef::FILE_MAP_OFFSET,
-            file_map_area_base_guest: MemoryDef::FILE_MAP_OFFSET,
-            file_map_area_size: MemoryDef::FILE_MAP_SIZE,
-            #[cfg(target_arch = "aarch64")]
-            hypercall_mmio_base: MemoryDef::HYPERCALL_MMIO_BASE,
-            #[cfg(target_arch = "aarch64")]
-            hypercall_mmio_size: MemoryDef::HYPERCALL_MMIO_SIZE,
-            stack_size: MemoryDef::DEFAULT_STACK_SIZE as usize,
-            ..Default::default()
+            guest_private: None,
+            host_shared: _hshared_map,
+            kernel_stack_size: MemoryDef::DEFAULT_STACK_SIZE as usize,
+            guest_mem_size: MemoryDef::KERNEL_MEM_INIT_REGION_SIZE * MemoryDef::ONE_GB,
         };
-        let default_mem_layout = mem_layout_config;
         let _kernel_bin_path = VirtualMachine::KERNEL_IMAGE.to_string();
         let _vdso_bin_path = VirtualMachine::VDSO_PATH.to_string();
         let _sbox_uid_name = vm::SANDBOX_UID_NAME.to_string();
@@ -91,7 +117,7 @@ impl VmType for VmNormal {
                 vdso_bin_path: _vdso_bin_path,
                 sandbox_uid_name: _sbox_uid_name,
                 pod_id: _pod_id,
-                mem_layout: default_mem_layout,
+                mem_layout: mem_layout_config,
             },
             entry_address: _kernel_entry,
             vdso_address: _vdso_address,
@@ -219,15 +245,16 @@ impl VmType for VmNormal {
 
         let mut page_opt = PageOpts::Zero();
         page_opt = PageOpts::Kernel();
-        let (kmem_base, _,kmem_size) = self.vm_resources.mem_area_info(KernelArea).unwrap();
-        vms.KernelMapHugeTable(Addr(kmem_base), Addr(kmem_base + kmem_size),
+        let (_, kmem_base, _) = self.vm_resources.mem_area_info(KernelArea).unwrap();
+        vms.KernelMapHugeTable(Addr(kmem_base),
+            Addr(kmem_base + self.vm_resources.mem_layout.guest_mem_size),
             Addr(kmem_base), page_opt.Val(),)?;
 
         #[cfg(target_arch = "aarch64")]
         {
             page_opt = PageOpts::Zero();
             page_opt.SetWrite().SetGlobal().SetPresent().SetAccessed().SetMMIOPage();
-            let (hcall_base, _, hcall_size) =
+            let (_, hcall_base, hcall_size) =
                 self.vm_resources.mem_area_info(HypercallMmioArea).unwrap();
             vms.KernelMap(Addr(hcall_base), Addr(hcall_base + hcall_size),
                 Addr(hcall_base), page_opt.Val())?;
@@ -303,11 +330,12 @@ impl VmType for VmNormal {
     }
 
     fn vm_memory_initialize(&self, vm_fd: &VmFd) -> Result<(), Error> {
-        let (kmem_base, _, kmem_size) = self.vm_resources.mem_area_info(KernelArea).unwrap();
+        let (kmem_base, _, _) = self.vm_resources.mem_area_info(KernelArea).unwrap();
+        let g_mem = self.vm_resources.mem_layout.guest_mem_size;
         let kvm_mem_region = kvm_bindings::kvm_userspace_memory_region {
             slot: 1,
             guest_phys_addr: kmem_base,
-            memory_size: kmem_size,
+            memory_size: g_mem,
             userspace_addr: kmem_base,
             flags: 0,
         };
@@ -318,7 +346,7 @@ impl VmType for VmNormal {
         }
 
         info!("SetMemRegion - phyAddr:{:#x}, hostAddr:{:#x}, page mmap-size:{} MB",
-            kmem_base, kmem_base,kmem_size >> 20);
+            kmem_base, kmem_base, g_mem >> 20);
 
         Ok(())
     }
@@ -343,7 +371,7 @@ impl VmType for VmNormal {
                 page_allocator_addr,
                 share_space_addr,
                 auto_start,
-                self.vm_resources.mem_layout.stack_size,
+                self.vm_resources.mem_layout.kernel_stack_size,
                 Some(&kvm),
                 CCMode::None)?);
             vcpus.push(vcpu);
