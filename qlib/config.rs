@@ -148,7 +148,8 @@ pub enum CCMode {
     Normal,
     NormalEmu,
     SevSnp,
-    Max
+    Realm,
+    Max = 100,
 }
 
 impl CCMode {
@@ -158,8 +159,9 @@ impl CCMode {
             1 => CCMode::Normal,
             2 => CCMode::NormalEmu,
             3 => CCMode::SevSnp,
-            4 => CCMode::Max,
-            _ => CCMode::None,
+            4 => CCMode::Realm,
+            100 => CCMode::Max,
+            _ => panic!("Error: Illegal value for CCMode type."),
         }
     }
 }
