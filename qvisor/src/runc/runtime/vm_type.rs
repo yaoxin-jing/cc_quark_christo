@@ -15,6 +15,7 @@
 
 pub mod noncc;
 pub mod emulcc;
+pub mod realm;
 pub mod resources;
 
 use std::sync::Arc;
@@ -34,12 +35,12 @@ pub trait VmType: std::fmt::Debug {
                      pod_id: [u8; 64], share_space_addr: Option<u64>,
                      has_global_mem_barrier: Option<bool>) -> Result<(), Error>
         where Self: Sized;
-    fn create_kvm_vm(&self, kvm_fd: i32) -> Result<(Kvm, VmFd), Error>;
+    fn create_kvm_vm(&mut self, kvm_fd: i32) -> Result<(Kvm, VmFd), Error>;
     fn vm_memory_initialize(&self, vm_fd: &VmFd) -> Result<(), Error>;
-    fn post_memory_initialize(&mut self) -> Result<(), Error>;
+    fn post_memory_initialize(&mut self, vm_fd: &VmFd) -> Result<(), Error>;
     fn vm_vcpu_initialize(&self, kvm: &Kvm, vm_fd: &VmFd, total_vcpus: usize, entry_addr: u64,
                         auto_start: bool, page_allocator_addr: Option<u64>,
                         share_space_addr: Option<u64>) -> Result<Vec<Arc<ArchVirtCpu>>, Error>;
-    fn post_vm_initialize(&mut self) -> Result<(), Error>;
+    fn post_vm_initialize(&mut self, vm: &mut VmFd) -> Result<(), Error>;
     fn post_init_upadate(&mut self) -> Result<(), Error>;
 }

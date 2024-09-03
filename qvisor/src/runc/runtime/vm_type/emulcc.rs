@@ -53,48 +53,51 @@ impl VmType for VmCcEmul {
         } else {
             IDENTICAL_MAPPING.store(false, Ordering::Release);
         };
-        let mut _hshared_map:HashMap<MemAreaType, MemArea> = HashMap::new();
-        let mut _gpriv_map:HashMap<MemAreaType, MemArea> = HashMap::new();
-        _gpriv_map.insert(
+        let mut _mem_map:HashMap<MemAreaType, MemArea> = HashMap::new();
+        _mem_map.insert(
             MemAreaType::PrivateHeapArea,
             MemArea {
                 base_host: adjust_addr_to_host(MemoryDef::GUEST_PRIVATE_HEAP_OFFSET, _emul_type),
                 base_guest: MemoryDef::GUEST_PRIVATE_HEAP_OFFSET,
                 size: MemoryDef::GUEST_PRIVATE_HEAP_SIZE,
-                kvm_memory_region: None });
-        _gpriv_map.insert(
+                guest_private: true,
+                host_backedup: true });
+        _mem_map.insert(
             MemAreaType::KernelArea,
             MemArea {
                 base_host: adjust_addr_to_host(MemoryDef::PHY_LOWER_ADDR, _emul_type),
                 base_guest: MemoryDef::PHY_LOWER_ADDR,
                 size: MemoryDef::FILE_MAP_OFFSET - MemoryDef::PHY_LOWER_ADDR,
-                kvm_memory_region: None });
-        _hshared_map.insert(
+                guest_private: true,
+                host_backedup: true });
+        _mem_map.insert(
             MemAreaType::FileMapArea,
             MemArea {
                 base_host: MemoryDef::FILE_MAP_OFFSET,
                 base_guest: MemoryDef::FILE_MAP_OFFSET,
                 size: MemoryDef::FILE_MAP_SIZE,
-                kvm_memory_region: None });
-        _hshared_map.insert(
+                guest_private: false,
+                host_backedup: true });
+        _mem_map.insert(
             MemAreaType::SharedHeapArea,
             MemArea {
                 base_host: MemoryDef::GUEST_HOST_SHARED_HEAP_OFFSET,
                 base_guest: MemoryDef::GUEST_HOST_SHARED_HEAP_OFFSET,
                 size: MemoryDef::GUEST_HOST_SHARED_HEAP_SIZE,
-                kvm_memory_region: None });
+                guest_private: false,
+                host_backedup: true });
         #[cfg(target_arch = "aarch64")] {
-            _hshared_map.insert(
+            _mem_map.insert(
                 MemAreaType::HypercallMmioArea,
                 MemArea {
                     base_host: u64::MAX,
                     base_guest: MemoryDef::HYPERCALL_MMIO_BASE,
                     size: MemoryDef::HYPERCALL_MMIO_SIZE,
-                    kvm_memory_region: None });
+                    guest_private: false, // Semantically this is shared
+                    host_backedup: false });
         }
         let mem_layout_config = MemLayoutConfig {
-            guest_private: Some(_gpriv_map),
-            host_shared: _hshared_map,
+            mem_area_map: _mem_map,
             kernel_stack_size: MemoryDef::DEFAULT_STACK_SIZE as usize,
             guest_mem_size: MemoryDef::KERNEL_MEM_INIT_REGION_SIZE * MemoryDef::ONE_GB,
         };
@@ -129,9 +132,9 @@ impl VmType for VmCcEmul {
     }
 
     fn create_vm(
-        self: Box<VmCcEmul>,
+        mut self: Box<VmCcEmul>,
         kernel_elf: KernelELF,
-        args: Args,
+        args: Args
     ) -> Result<VirtualMachine, Error> {
         crate::GLOBAL_ALLOCATOR.InitPrivateAllocator();
         *ROOT_CONTAINER_ID.lock() = args.ID.clone();
@@ -322,7 +325,7 @@ impl VmType for VmCcEmul {
         Ok(())
     }
 
-    fn create_kvm_vm(&self, kvm_fd: i32) -> Result<(Kvm, VmFd), Error> {
+    fn create_kvm_vm(&mut self, kvm_fd: i32) -> Result<(Kvm, VmFd), Error> {
         let kvm = unsafe { Kvm::from_raw_fd(kvm_fd) };
 
         if !kvm.check_extension(Cap::ImmediateExit) {
@@ -393,7 +396,7 @@ impl VmType for VmCcEmul {
         Ok(())
     }
 
-    fn post_memory_initialize(&mut self) -> Result<(), Error> {
+    fn post_memory_initialize(&mut self, vm: &VmFd) -> Result<(), Error> {
         Ok(())
     }
 
@@ -422,7 +425,7 @@ impl VmType for VmCcEmul {
         Ok(vcpus)
     }
 
-    fn post_vm_initialize(&mut self) -> Result<(), Error> {
+    fn post_vm_initialize(&mut self, vm_fd: &mut VmFd) -> Result<(), Error> {
         Ok(())
     }
 

@@ -63,8 +63,8 @@ impl VmType for VmNormal {
                 base_host: MemoryDef::HEAP_OFFSET,
                 base_guest: MemoryDef::HEAP_OFFSET,
                 size: MemoryDef::HEAP_SIZE,
-                kvm_memory_region: None,
-            });
+                guest_private: false,
+                host_backedup: true });
         _hshared_map.insert(
             MemAreaType::KernelArea,
             MemArea {
@@ -72,16 +72,16 @@ impl VmType for VmNormal {
                 base_guest: MemoryDef::PHY_LOWER_ADDR,
                 // Kernel Image + RDMA
                 size: MemoryDef::FILE_MAP_OFFSET - MemoryDef::PHY_LOWER_ADDR,
-                kvm_memory_region: None,
-            });
+                guest_private: false,
+                host_backedup: true });
         _hshared_map.insert(
             MemAreaType::FileMapArea,
             MemArea {
                 base_host: MemoryDef::FILE_MAP_OFFSET,
                 base_guest: MemoryDef::FILE_MAP_OFFSET,
                 size: MemoryDef::FILE_MAP_SIZE,
-                kvm_memory_region: None
-            });
+                guest_private: false,
+                host_backedup: true });
         #[cfg(target_arch = "aarch64")] {
             _hshared_map.insert(
                 MemAreaType::HypercallMmioArea,
@@ -89,12 +89,11 @@ impl VmType for VmNormal {
                     base_host: u64::MAX,
                     base_guest: MemoryDef::HYPERCALL_MMIO_BASE,
                     size: MemoryDef::HYPERCALL_MMIO_SIZE,
-                    kvm_memory_region: None,
-                });
+                    guest_private: false,
+                    host_backedup: false });
         }
         let mem_layout_config = MemLayoutConfig {
-            guest_private: None,
-            host_shared: _hshared_map,
+            mem_area_map: _hshared_map,
             kernel_stack_size: MemoryDef::DEFAULT_STACK_SIZE as usize,
             guest_mem_size: MemoryDef::KERNEL_MEM_INIT_REGION_SIZE * MemoryDef::ONE_GB,
         };
@@ -128,7 +127,7 @@ impl VmType for VmNormal {
     }
 
     fn create_vm(
-        self: Box<VmNormal>,
+        mut self: Box<VmNormal>,
         kernel_elf: KernelELF,
         args: Args,
     ) -> Result<VirtualMachine, Error> {
@@ -306,7 +305,7 @@ impl VmType for VmNormal {
         Ok(())
     }
 
-    fn create_kvm_vm(&self, kvm_fd: i32) -> Result<(Kvm, VmFd), Error> {
+    fn create_kvm_vm(&mut self, kvm_fd: i32) -> Result<(Kvm, VmFd), Error> {
         let kvm = unsafe { Kvm::from_raw_fd(kvm_fd) };
 
         if !kvm.check_extension(Cap::ImmediateExit) {
@@ -381,11 +380,11 @@ impl VmType for VmNormal {
         Ok(vcpus)
     }
 
-    fn post_memory_initialize(&mut self) -> Result<(), Error> {
+    fn post_memory_initialize(&mut self, vm_fd: &VmFd) -> Result<(), Error> {
         Ok(())
     }
 
-    fn post_vm_initialize(&mut self) -> Result<(), Error> {
+    fn post_vm_initialize(&mut self, vm_fd: &mut VmFd) -> Result<(), Error> {
         Ok(())
     }
 
