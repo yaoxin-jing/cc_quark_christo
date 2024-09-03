@@ -14,3 +14,4 @@ vdso/*.o
 vdso/*.so
 *.iml
 tags
+Cargo.lock
