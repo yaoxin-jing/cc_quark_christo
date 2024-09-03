@@ -22,6 +22,7 @@ pub mod vm;
 
 pub mod tee;
 
+use kvm_bindings::kvm_vcpu_init;
 use kvm_ioctls::{Kvm, VcpuExit, VcpuFd, VmFd};
 use vm::vcpu::ArchVirtCpu;
 use crate::{qlib::common::Error, CCMode};
@@ -36,6 +37,8 @@ pub trait VirtCpu {
     fn default_hypercall_handler(&self, hypercall: u16, data: &[u8],
         arg0: u64, arg1: u64, arg2: u64, arg3: u64) -> Result<bool, Error>;
     fn default_kvm_exit_handler(&self, kvm_exit: VcpuExit) -> Result<bool, Error>;
+    fn vcpu_init(&self) -> Result<(), Error> { Ok(()) }
+    fn vcpu_init_finalize(&self) -> Result<(), Error> { Ok(()) }
     fn vcpu_run(&self, tgid: i32) -> Result<(), Error>;
 }
 
@@ -53,4 +56,5 @@ pub trait ConfCompExtension: Send + Sync {
     fn handle_hypercall(&self, hypercall: u16, data: &[u8], arg0: u64, arg1: u64, arg2: u64,
         arg3: u64, vcpu_id: usize) -> Result<bool , Error>;
     fn confidentiality_type(&self) -> CCMode;
+    fn set_vcpu_features(&self, kvi: &mut kvm_vcpu_init) {}
 }
