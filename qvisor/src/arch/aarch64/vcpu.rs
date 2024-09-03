@@ -23,7 +23,7 @@ use crate::{arch::{tee::{NonConf, emulcc::EmulCc}, ConfCompExtension, VirtCpu},
             linux::time::Timespec, linux_def::{MemoryDef, SysErr}, qmsg::qcall::{Print, QMsg},
             GetTimeCall, VcpuFeq, config::CCMode, task_mgr::TaskId}, runc::runtime::vm, syncmgr::SyncMgr, KVMVcpu, GLOCK,
             KERNEL_IO_THREAD, SHARE_SPACE, VMS};
-use super::vcpu::kvm_vcpu::*;
+use super::{vcpu::kvm_vcpu::*, tee::{realm::RealmCca, kvm}};
 use std::{sync::atomic::Ordering, vec::Vec};
 
 pub struct Aarch64VirtCpu {
@@ -33,7 +33,7 @@ pub struct Aarch64VirtCpu {
     cpacr_el1: u64,
     sctlr_el1: u64,
     cntkctl_el1: u64,
-    kvi: kvm_vcpu_init,
+    pub kvi: kvm_vcpu_init,
     pub vcpu_base: KVMVcpu,
     pub conf_comp_extension: Box<dyn ConfCompExtension>,
 }
@@ -60,6 +60,10 @@ impl VirtCpu for Aarch64VirtCpu {
                 EmulCc::initialize_conf_extension(share_space_table_addr,
                 page_allocator_base_addr)?
             },
+            CCMode::Realm => {
+                RealmCca::initialize_conf_extension(share_space_table_addr,
+                page_allocator_base_addr)?
+            },
             _ => {
                 return Err(
                     Error::InvalidArgument("Create vcpu failed - bad ConfCompType".to_string()));
@@ -70,6 +74,7 @@ impl VirtCpu for Aarch64VirtCpu {
         vm_fd.get_preferred_target(&mut _kvi)
             .map_err(|e| format!("Failed to find kvm target for vcpu - error:{:?}", e))?;
         _kvi.features[0] |= 1 << KVM_ARM_VCPU_PSCI_0_2;
+        _conf_comp_ext.set_vcpu_features(&mut _kvi);
 
         let _self = Self {
             tcr_el1: TCR_EL1_DEFAULT,
@@ -86,6 +91,13 @@ impl VirtCpu for Aarch64VirtCpu {
         Ok(_self)
     }
 
+    fn vcpu_init(&self) -> Result<(), Error> {
+        self.vcpu_base.vcpu_fd.vcpu_init(&self.kvi)
+            .map_err(|e| Error::SystemErr(e.errno()))?;
+
+        Ok(())
+    }
+
     fn initialize_sys_registers(&self) -> Result<(), Error> {
         let tcr_el1 = Register::Reg(TcrEl1, self.tcr_el1);
         let mair_el1 = Register::Reg(MairEl1, self.mair_el1);
@@ -95,7 +107,8 @@ impl VirtCpu for Aarch64VirtCpu {
         let sctlr_el1 = Register::Reg(SctlrEl1, self.sctlr_el1);
         let reg_list: Vec<Register> = vec![tcr_el1, mair_el1, ttbr0_el1, cntkctl_el1,
                                         cpacr_el1, sctlr_el1];
-        self.vcpu_base.set_regs(reg_list)
+        self.vcpu_base.set_regs(reg_list)?;
+        self.conf_comp_extension.set_sys_registers(&self.vcpu_base.vcpu_fd)
     }
 
     fn initialize_cpu_registers(&self) -> Result<(), Error> {
@@ -107,16 +120,17 @@ impl VirtCpu for Aarch64VirtCpu {
         let x4 = Register::Reg(X4, self.vcpu_base.vcpuCnt as u64);
         let x5 = Register::Reg(X5, self.vcpu_base.autoStart as u64);
         let reg_list = vec![sp_el1, pc, x2, x3, x4, x5];
-        self.vcpu_base.set_regs(reg_list)
+        self.vcpu_base.set_regs(reg_list)?;
+        self.conf_comp_extension.set_cpu_registers(&self.vcpu_base.vcpu_fd)
+    }
+
+    fn vcpu_init_finalize(&self) -> Result<(), Error> {
+        kvm::kvm_arm_rme_vcpu_finalize(&self.vcpu_base.vcpu_fd)
+            .expect("vCpu: Failed to finalize initialization");
+        Ok(())
     }
 
     fn vcpu_run(&self, tgid: i32) -> Result<(), Error> {
-        self.vcpu_base.vcpu_fd.vcpu_init(&self.kvi)
-            .map_err(|e| Error::SystemErr(e.errno()))?;
-        self.initialize_sys_registers().expect("Can not run vcpu - failed to init sysregs");
-        self.initialize_cpu_registers().expect("Can not run vcpu - failed to init cpu-regs");
-        self.conf_comp_extension.set_sys_registers(&self.vcpu_base.vcpu_fd)?;
-        self.conf_comp_extension.set_cpu_registers(&self.vcpu_base.vcpu_fd)?;
         SetExitSignal();
         self.vcpu_base.SignalMask();
         if self.vcpu_base.cordId > 0 {
