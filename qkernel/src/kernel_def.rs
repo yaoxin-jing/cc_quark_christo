@@ -558,7 +558,7 @@ impl HostAllocator {
     #[cfg(feature = "cc")]
     pub fn InitPrivateAllocator(&self, mode: CCMode) {
         match mode {
-            CCMode::NormalEmu => {
+            CCMode::NormalEmu | CCMode::Realm => {
                 crate::qlib::kernel::Kernel::IDENTICAL_MAPPING.store(false, Ordering::SeqCst);
                 self.guestPrivHeapAddr.store(
                     MemoryDef::GUEST_PRIVATE_RUNNING_HEAP_OFFSET,

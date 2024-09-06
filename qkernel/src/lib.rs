@@ -619,6 +619,9 @@ pub extern "C" fn rust_main(
             GLOBAL_ALLOCATOR.InitPrivateAllocator(CCMode::from(shareSpaceAddr));
             GLOBAL_ALLOCATOR.InitSharedAllocator();
             if shareSpaceAddr < (CCMode::Max as u64) {
+                if CCMode::tee_backedup(shareSpaceAddr) {
+                    crate::qlib::kernel::arch::tee::TEE_ACTIVE.store(true, Ordering::Relaxed);
+                }
                 ENABLE_CC.store(true, Ordering::Release);
                 GLOBAL_ALLOCATOR.InitSharedAllocator_cc();
                 let size = core::mem::size_of::<ShareSpace>();
