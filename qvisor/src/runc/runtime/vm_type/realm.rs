@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Deref;
 use std::os::fd::FromRawFd;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -29,6 +30,7 @@ use crate::qlib::addr::{PageOpts, Addr};
 use crate::qlib::kernel::SHARESPACE;
 use crate::qlib::kernel::kernel::{futex, timer};
 use crate::qlib::kernel::vcpu::CPU_LOCAL;
+use crate::qlib::pagetable::{self, PageTableFlags};
 use crate::qlib::pagetable::PageTables;
 use crate::runc::runtime::vm_type::resources::MemArea;
 use crate::vmspace::VMSpace;
@@ -328,25 +330,33 @@ impl VmType for VmCcRealm {
         PMA_KEEPER.InitHugePages();
         vms.pageTables = PageTables::New(&vms.allocator)?;
 
-        let mut page_opt = PageOpts::Zero();
-        page_opt = PageOpts::Kernel();
-        let (_, kmem_base_guest, _) = self.vm_resources
-            .mem_area_info(MemAreaType::KernelArea).unwrap();
         //TODO: Break the mapping here or in kernel:
         //      Adjust to Shared/NotShared bit
-        todo!("Kernel Pt kreation");
-        vms.KernelMapHugeTable(Addr(kmem_base_guest),
-            Addr(kmem_base_guest + self.vm_resources.mem_layout.guest_mem_size),
-            Addr(kmem_base_guest), page_opt.Val(),)?;
+        //todo!("Kernel Pt kreation");
 
-        #[cfg(target_arch = "aarch64")]
-        {
-            page_opt = PageOpts::Zero();
-            page_opt.SetWrite().SetGlobal().SetPresent().SetAccessed().SetMMIOPage();
-            let (_, hcall_base, hcall_size) =
-                self.vm_resources.mem_area_info(MemAreaType::HypercallMmioArea).unwrap();
-            vms.KernelMap(Addr(hcall_base), Addr(hcall_base + hcall_size),
-                Addr(hcall_base), page_opt.Val())?;
+        let untrusted_range = PageTableFlags::new_with_bit_set(&self.realm.ipa_size - 1);
+        let block_size = pagetable::HugePageType::MB2;
+        for (_mt, _ma) in &self.vm_resources.mem_layout.mem_area_map {
+            info!("VM: Creating mapping for {}", _mt.to_string());
+            if *_mt == MemAreaType::HypercallMmioArea {
+                 let mut page_opt = PageOpts::Zero();
+                 page_opt.SetWrite().SetGlobal().SetPresent().SetAccessed().SetMMIOPage();
+                 vms.KernelMap(Addr(_ma.base_guest), Addr(_ma.base_guest + _ma.size),
+                     Addr(_ma.base_guest), page_opt.Val())?;
+            } else {
+                let mut entry_opt = PageOpts::Zero();
+                entry_opt = PageOpts::Kernel();
+                entry_opt.SetBlock();
+
+                if _ma.guest_private == false {
+                    entry_opt.set_option_x(&untrusted_range);
+                }
+
+                if vms.KernelMapHugeTable(Addr(_ma.base_guest), Addr(_ma.base_guest + _ma.size),
+                    Addr(_ma.base_guest), entry_opt.Val(), block_size).unwrap() == false {
+                        panic!("VM: Failed to map {}", _mt.to_string());
+                }
+            }
         }
         vms.args = Some(args);
 
