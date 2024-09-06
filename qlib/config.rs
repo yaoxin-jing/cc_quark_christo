@@ -164,4 +164,12 @@ impl CCMode {
             _ => panic!("Error: Illegal value for CCMode type."),
         }
     }
+
+    pub fn tee_backedup(cc_type: u64) -> bool {
+        let res: bool = match Self::from(cc_type) {
+            CCMode::SevSnp | CCMode::Realm => { true },
+            _ => { false },
+        };
+        res
+    }
 }
