@@ -171,6 +171,12 @@ impl PageTableFlags {
         PageTableFlags::READ_ONLY.bits() |
         PageTableFlags::PXN.bits() |
         PageTableFlags::UXN.bits());
+
+    pub fn new_with_bit_set(position: u64) -> Self {
+        PageTableFlags {
+            bits: 0x1 << position,
+        }
+    }
 }
 
 

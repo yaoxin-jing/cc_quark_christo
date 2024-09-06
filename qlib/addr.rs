@@ -16,6 +16,7 @@ use alloc::string::String;
 use alloc::string::ToString;
 use core::u64;
 
+use super::pagetable;
 use super::pagetable::PageTableFlags;
 use super::common::*;
 use super::linux_def::*;
@@ -386,6 +387,13 @@ impl PageOpts {
     pub fn Val(&self) -> PageTableFlags {
         return self.0;
     }
+
+    /// Modifies the internal state by setting the passed flag.
+    /// NOTE: You should know what are you doing a.k.a the effect
+    /// that change will bring.
+    pub fn set_option_x(&mut self, flag: &PageTableFlags) {
+        self.0.insert(*flag);
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -527,6 +535,11 @@ impl Addr {
 
     pub fn IsPageAligned(&self) -> bool {
         self.PageOffset() == 0
+    }
+
+    pub fn is_huge_page_aligned(&self, _type: pagetable::HugePageType) -> bool {
+        let align_size = _type.size();
+        return (self.0 & (align_size -1)) == 0
     }
 
     pub fn PageAligned(&self) -> Result<()> {
