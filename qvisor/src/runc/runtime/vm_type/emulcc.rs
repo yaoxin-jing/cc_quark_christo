@@ -21,7 +21,8 @@ use kvm_ioctls::{Cap, Kvm, VmFd};
 use crate::{arch::{tee::util::{adjust_addr_to_guest, adjust_addr_to_host, get_offset},
             vm::vcpu::ArchVirtCpu}, elf_loader::KernelELF, kvm_vcpu::KVMVcpu, print::LOG,
             qlib::{addr::{Addr, PageOpts}, common::Error, kernel::{kernel::{futex, timer},
-            vcpu::CPU_LOCAL, SHARESPACE}, linux_def::MemoryDef, pagetable::PageTables, ShareSpace},
+            vcpu::CPU_LOCAL, SHARESPACE, arch::__arch::mm::pagetable}, linux_def::MemoryDef,
+            pagetable::PageTables, pagetable::HugePageType, ShareSpace},
             runc::runtime::{loader::Args, vm::{self, VirtualMachine}}, tsot_agent::TSOT_AGENT,
             CCMode, VMSpace, KERNEL_IO_THREAD, PMA_KEEPER, QUARK_CONFIG, ROOT_CONTAINER_ID,
             SHARE_SPACE, URING_MGR, VMS};
@@ -241,7 +242,7 @@ impl VmType for VmCcEmul {
             .mem_area_info(MemAreaType::KernelArea).unwrap();
         vms.KernelMapHugeTable(Addr(kmem_base_guest),
             Addr(kmem_base_guest + self.vm_resources.mem_layout.guest_mem_size),
-            Addr(kmem_base_guest), page_opt.Val(),)?;
+            Addr(kmem_base_guest), page_opt.Val(), HugePageType::GB1)?;
 
         #[cfg(target_arch = "aarch64")]
         {

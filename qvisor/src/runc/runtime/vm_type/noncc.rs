@@ -247,7 +247,7 @@ impl VmType for VmNormal {
         let (_, kmem_base, _) = self.vm_resources.mem_area_info(KernelArea).unwrap();
         vms.KernelMapHugeTable(Addr(kmem_base),
             Addr(kmem_base + self.vm_resources.mem_layout.guest_mem_size),
-            Addr(kmem_base), page_opt.Val(),)?;
+            Addr(kmem_base), page_opt.Val(), pagetable::HugePageType::GB1)?;
 
         #[cfg(target_arch = "aarch64")]
         {
