@@ -641,6 +641,8 @@ pub extern "C" fn rust_main(
         }
         SingletonInit();
         debug!("init singleton finished");
+        debug!("QK: realm started - exit");
+        return;
         SetVCPCount(vcpuCnt as usize);
         #[cfg(feature = "cc")]
         VCPU_ALLOCATOR.Print();
