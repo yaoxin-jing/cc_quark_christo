@@ -40,6 +40,7 @@ impl StartCmd {
     }
 
     pub fn Run(&self, gCfg: &GlobalConfig) -> Result<()> {
+        println!("Container:: start ....");
         info!("Container:: start ....");
         let id = &self.id;
 
@@ -49,6 +50,7 @@ impl StartCmd {
         //eprintln!("Application error: teststasdfasfd");
         //::std::process::exit(1);
 
+        println!("Container:: start .... done");
         return Ok(());
     }
 }

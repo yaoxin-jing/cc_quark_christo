@@ -58,7 +58,7 @@ impl CreateCmd {
     pub fn Run(&self, gCfg: &GlobalConfig) -> Result<()> {
         let specfile = Join(&self.bundleDir, "config.json");
         let spec = Spec::load(&specfile).unwrap();
-        
+        println!("QV: create container");
         Container::Create(
             &self.id,
             RunAction::Create,
@@ -71,6 +71,8 @@ impl CreateCmd {
             true,
             self.pivot,
         )?;
+        println!("QV: create container done");
+        info!("QV: create container done");
 
         //eprintln!("Application error: teststasdfasfd");
         //::std::process::exit(1);

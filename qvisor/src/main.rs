@@ -184,7 +184,7 @@ lazy_static! {
     pub static ref GUEST_KERNEL: Mutex<Option<Kernel>> = Mutex::new(None);
 }
 
-pub const LOG_FILE: &'static str = "/var/log/quark/quark.log";
+pub const LOG_FILE: &'static str = "/home/realm/tmp/Qbox/log/quark.log";
 
 pub fn InitSingleton() {
     self::qlib::InitSingleton();
@@ -198,6 +198,8 @@ pub static GLOBAL_ALLOCATOR: HostAllocator = HostAllocator::New();
 pub static GUEST_HOST_SHARED_ALLOCATOR: GuestHostSharedAllocator = GuestHostSharedAllocator::New();
 
 fn main() {
+
+    println!("QV: start Quark");
     InitSingleton();
 
     let cmd;

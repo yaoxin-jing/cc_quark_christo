@@ -176,12 +176,12 @@ impl VirtualMachine {
     }
 
     #[cfg(debug_assertions)]
-    pub const KERNEL_IMAGE: &'static str = "/usr/local/bin/qkernel_d.bin";
+    pub const KERNEL_IMAGE: &'static str = "/home/realm/tmp/Qbox/qbins/qkernel_d.bin";
 
     #[cfg(not(debug_assertions))]
-    pub const KERNEL_IMAGE: &'static str = "/usr/local/bin/qkernel.bin";
+    pub const KERNEL_IMAGE: &'static str = "/home/realm/tmp/Qbox/qbins/qkernel.bin";
 
-    pub const VDSO_PATH: &'static str = "/usr/local/bin/vdso.so";
+    pub const VDSO_PATH: &'static str = "/home/realm/tmp/Qbox/qbins/vdso.so";
 
     pub fn Init(args: Args, cc_mode: CCMode) -> Result<Self> {
         PerfGoto(PerfType::Other);
