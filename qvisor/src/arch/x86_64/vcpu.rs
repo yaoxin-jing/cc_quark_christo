@@ -148,27 +148,27 @@ impl VirtCpu for X86_64VirtCpu {
 
         #[cfg(feature = "tdx")]
         {
-            let vm_regs_array = unsafe { &mut *(MemoryDef::VM_REGS_OFFSET as *mut VMRegsArray) };
-            let vm_regs = &mut vm_regs_array.vmRegsWrappers[self.vcpu_base.id].vmRegs;
-            vm_regs.rax = regs.rax;
-            vm_regs.rbx = regs.rbx;
-            vm_regs.rcx = regs.rcx;
-            vm_regs.rdx = regs.rdx;
-            vm_regs.rsi = regs.rsi;
-            vm_regs.rdi = regs.rdi;
-            vm_regs.rsp = regs.rsp;
-            vm_regs.rbp = regs.rbp;
-            vm_regs.r8 = regs.r8;
-            vm_regs.r9 = regs.r9;
-            vm_regs.r10 = regs.r10;
-            vm_regs.r11 = regs.r11;
-            vm_regs.r12 = regs.r12;
-            vm_regs.r13 = regs.r13;
-            vm_regs.r14 = regs.r14;
-            vm_regs.r15 = regs.r15;
-            vm_regs.rip = regs.rip;
-            vm_regs.rflags = regs.rflags;
             if get_tee_type() == CCMode::TDX {
+                let vm_regs_array = unsafe { &mut *(MemoryDef::VM_REGS_OFFSET as *mut VMRegsArray) };
+                let vm_regs = &mut vm_regs_array.vmRegsWrappers[self.vcpu_base.id].vmRegs;
+                vm_regs.rax = regs.rax;
+                vm_regs.rbx = regs.rbx;
+                vm_regs.rcx = regs.rcx;
+                vm_regs.rdx = regs.rdx;
+                vm_regs.rsi = regs.rsi;
+                vm_regs.rdi = regs.rdi;
+                vm_regs.rsp = regs.rsp;
+                vm_regs.rbp = regs.rbp;
+                vm_regs.r8 = regs.r8;
+                vm_regs.r9 = regs.r9;
+                vm_regs.r10 = regs.r10;
+                vm_regs.r11 = regs.r11;
+                vm_regs.r12 = regs.r12;
+                vm_regs.r13 = regs.r13;
+                vm_regs.r14 = regs.r14;
+                vm_regs.r15 = regs.r15;
+                vm_regs.rip = regs.rip;
+                vm_regs.rflags = regs.rflags;
                 return Ok(());
             }
         }
