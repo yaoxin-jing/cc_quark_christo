@@ -800,6 +800,23 @@ pub extern "C" fn rust_main(
         set_cpu_local(id);
         //PerfGoto(PerfType::Kernel);
     }
+
+    //xcr0 should be initialized inside the kernel if tdx is enabled.
+    #[cfg(feature = "tdx")]
+    if crate::qlib::kernel::arch::tee::get_tee_type() == CCMode::TDX {
+        use x86_64::registers::xcontrol::XCr0Flags;
+        unsafe {
+            x86_64::registers::xcontrol::XCr0::write(
+                XCr0Flags::X87
+                    | XCr0Flags::SSE
+                    | XCr0Flags::AVX
+                    | XCr0Flags::OPMASK
+                    | XCr0Flags::ZMM_HI256
+                    | XCr0Flags::HI16_ZMM
+                    | XCr0Flags::MPK,
+            );
+        }
+    }
     let initialized_num = IS_INITIALIZED_COUNTER.fetch_add(1, Ordering::Release);
     if initialized_num + 1 == vcpuCnt {
         IS_INITIALIZED.store(true, Ordering::Release);
