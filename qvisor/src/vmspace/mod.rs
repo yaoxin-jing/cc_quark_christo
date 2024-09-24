@@ -1871,13 +1871,14 @@ impl VMSpace {
         flags: PageTableFlags,
         hpage_size: pagetable::HugePageType
     ) -> Result<bool> {
-        info!("KernelMap1G start is {:x}, end is {:x}", start.0, end.0);
         match hpage_size {
             pagetable::HugePageType::GB1 => {
+                info!("KernelMap1G start is {:x}, end is {:x}", start.0, end.0);
                 return self.pageTables
                     .MapWith1G(start, end, physical, flags, &mut self.allocator, true);
             },
             pagetable::HugePageType::MB2 => {
+                info!("KernelMap2MB start is {:x}, end is {:x}", start.0, end.0);
                 return self.pageTables
                     .MapWith2MB(start, end, physical, flags, &mut self.allocator, true);
             }

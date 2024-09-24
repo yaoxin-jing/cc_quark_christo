@@ -21,11 +21,14 @@ pub mod vm;
 pub mod vm;
 
 pub mod tee;
+pub mod kvm;
 
 use kvm_bindings::kvm_vcpu_init;
 use kvm_ioctls::{Kvm, VcpuExit, VcpuFd, VmFd};
 use vm::vcpu::ArchVirtCpu;
 use crate::{qlib::common::Error, CCMode};
+
+use self::vm::vcpu::kvm_vcpu::Register;
 
 pub trait VirtCpu {
     fn new_vcpu(vcpu_id: usize, total_vcpus: usize, vm_fd: &VmFd, entry_addr: u64,
@@ -46,8 +49,14 @@ pub trait ConfCompExtension: Send + Sync {
     fn initialize_conf_extension(share_space_table_addr: Option<u64>,
         page_allocator_base_addr: Option<u64>) -> Result<Box<dyn ConfCompExtension>, Error>
         where Self: Sized;
-    fn set_sys_registers(&self, vcpu_fd: &VcpuFd) -> Result<(), Error>;
-    fn set_cpu_registers(&self, vcpu_fd: &VcpuFd) -> Result<(), Error>;
+    fn set_sys_registers(&self, _vcpu_fd: &VcpuFd, _regs: Option<Vec<Register>>)
+        -> Result<(), Error> {
+        Ok(())
+    }
+    fn set_cpu_registers(&self, _vcpu_fd: &VcpuFd, _regs: Option<Vec<Register>>)
+        -> Result<(), Error> {
+        Ok(())
+    }
     fn get_hypercall_arguments(&self, vcpu_fd: &VcpuFd, vcpu_id: usize)
         -> Result<(u64, u64, u64, u64), Error>;
     fn should_handle_kvm_exit(&self, kvm_exit: &VcpuExit) -> bool;
@@ -56,5 +65,5 @@ pub trait ConfCompExtension: Send + Sync {
     fn handle_hypercall(&self, hypercall: u16, data: &[u8], arg0: u64, arg1: u64, arg2: u64,
         arg3: u64, vcpu_id: usize) -> Result<bool , Error>;
     fn confidentiality_type(&self) -> CCMode;
-    fn set_vcpu_features(&self, kvi: &mut kvm_vcpu_init) {}
+    fn set_vcpu_features(&self, _kvi: &mut kvm_vcpu_init) {}
 }

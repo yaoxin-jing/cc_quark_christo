@@ -14,6 +14,7 @@
 
 use std::cmp::Ordering;
 
+use crate::arch::vm::vcpu::kvm_vcpu::Register;
 use crate::qlib::linux_def::MemoryDef;
 use crate::runc::runtime::vm::VirtualMachine;
 use crate::runc::runtime::vm_type::VmType;
@@ -22,7 +23,7 @@ use crate::runc::runtime::vm_type::emulcc::VmCcEmul;
 use crate::sharepara::ShareParaPage;
 use crate::VMS;
 use crate::{arch::ConfCompExtension, qlib, QUARK_CONFIG};
-use kvm_ioctls::VcpuExit;
+use kvm_ioctls::{VcpuExit, VcpuFd};
 use qlib::config::CCMode;
 use qlib::common::Error;
 
@@ -51,11 +52,8 @@ impl ConfCompExtension for EmulCc<'_> {
         Ok(_self)
     }
 
-    fn set_sys_registers(&self, vcpu_fd: &kvm_ioctls::VcpuFd) -> Result<(), crate::qlib::common::Error> {
-        Ok(())
-    }
-
-    fn set_cpu_registers(&self, vcpu_fd: &kvm_ioctls::VcpuFd) -> Result<(), crate::qlib::common::Error> {
+    fn set_cpu_registers(&self, vcpu_fd: &VcpuFd, regs: Option<Vec<Register>>)
+        -> Result<(), Error> {
         self._set_cpu_registers(&vcpu_fd)
     }
 

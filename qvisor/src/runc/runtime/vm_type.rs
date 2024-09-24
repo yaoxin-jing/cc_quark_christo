@@ -36,8 +36,8 @@ pub trait VmType: std::fmt::Debug {
                      has_global_mem_barrier: Option<bool>) -> Result<(), Error>
         where Self: Sized;
     fn create_kvm_vm(&mut self, kvm_fd: i32) -> Result<(Kvm, VmFd), Error>;
-    fn vm_memory_initialize(&self, vm_fd: &VmFd) -> Result<(), Error>;
-    fn post_memory_initialize(&mut self, vm_fd: &VmFd) -> Result<(), Error>;
+    fn vm_memory_initialize(&mut self, vm_fd: &VmFd) -> Result<(), Error>;
+    fn post_memory_initialize(&mut self, vm_fd: &mut VmFd) -> Result<(), Error>;
     fn vm_vcpu_initialize(&self, kvm: &Kvm, vm_fd: &VmFd, total_vcpus: usize, entry_addr: u64,
                         auto_start: bool, page_allocator_addr: Option<u64>,
                         share_space_addr: Option<u64>) -> Result<Vec<Arc<ArchVirtCpu>>, Error>;

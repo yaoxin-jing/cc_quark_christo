@@ -19,10 +19,16 @@ use crate::qlib::kernel::asm::aarch64;
 
 lazy_static! {
     ///
-    ///The IPA size is read from TCR_EL1.IPS
+    ///On VMM: from the configuration
+    ///On VM: The IPA size is read from TCR_EL1.IPS
     ///
     #[derive(Copy, Clone)]
-    static ref IPA_SIZE: u64 = get_ipa_size();
+    static ref IPA_SIZE: u64 = if cfg!(feature = "duck-qk") {
+                                  get_ipa_size()
+                               } else {
+                                   debug!("VM: You are using IPA_SIZE=40 as default - needs fix");
+                                    40
+                               };
 }
 
 impl Sub<u64> for IPA_SIZE {
@@ -73,5 +79,34 @@ pub fn ipa_adjust(ipa: &mut u64, protect: bool) {
         set_shared_bit(ipa);
     } else {
         unset_shared_bit(ipa);
+    }
+}
+
+// RSI //
+#[repr(C)]
+pub struct RsiHostCall {
+    pub imm: u16,
+    pub _pad0:[u8; 6],
+    pub gprs: [u64; 31],
+}
+
+impl RsiHostCall {
+    const FID: u32 = 0xC4000199;
+    pub fn new (_imm: u16, _gprs: [u64; 31]) -> Self {
+        Self {
+            imm: _imm,
+            _pad0: [0u8; 6],
+            gprs: _gprs
+        }
+    }
+
+    pub fn rsi_host_call() {
+        use crate::qlib::kernel::asm::aarch64 as asm;
+        let pc: u64;
+        let sp: u64 = asm::GetCurrentUserSp();
+        let ttbr0: u64 = asm::CurrentUserTable();
+
+
+
     }
 }

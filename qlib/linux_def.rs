@@ -3101,14 +3101,21 @@ impl MemoryDef {
     pub const HOST_INIT_HEAP_SIZE: u64 = 1 * Self::ONE_GB;
     pub const HOST_INIT_HEAP_END: u64 = Self::HOST_INIT_HEAP_OFFSET + Self::HOST_INIT_HEAP_SIZE;
     pub const GUEST_PRIVATE_HEAP_OFFSET: u64 = Self::HEAP_OFFSET;
-    pub const GUEST_PRIVATE_HEAP_SIZE: u64 = 5 * Self::ONE_GB;
+    //NOTE: Test sizes:
+    //  Total guest private heap: 1 GB
+    //  - Init private heap: 250 MB
+    //  - Guest private running heap: 750 MB
+    //NOTE:Test size -> replace with: 5 * ONE_GB
+    pub const GUEST_PRIVATE_HEAP_SIZE: u64 = 500 * Self::ONE_MB;
     pub const GUEST_PRIVATE_HEAP_END: u64 = Self::GUEST_PRIVATE_HEAP_OFFSET + Self::GUEST_PRIVATE_HEAP_SIZE;
     pub const GUEST_HOST_SHARED_HEAP_OFFSET: u64 = Self::GUEST_PRIVATE_HEAP_END;
-    pub const GUEST_HOST_SHARED_HEAP_SIZE: u64 = 5 * Self::ONE_GB;
+    //NOTE: Test size -> replace with: 5 * ONE_GB
+    pub const GUEST_HOST_SHARED_HEAP_SIZE: u64 = 1 * Self::ONE_GB;
     pub const GUEST_HOST_SHARED_HEAP_END: u64 = Self::GUEST_HOST_SHARED_HEAP_OFFSET + Self::GUEST_HOST_SHARED_HEAP_SIZE;
     pub const UNIDENTICAL_MAPPING_OFFSET: u64 = 30 * Self::ONE_GB;
     pub const GUEST_PRIVATE_INIT_HEAP_OFFSET: u64 = Self::HEAP_OFFSET;
-    pub const GUEST_PRIVATE_INIT_HEAP_SIZE: u64 = 1 * Self::ONE_GB;
+    //NOTE: Test size -> replace with: 1 * ONE_GB
+    pub const GUEST_PRIVATE_INIT_HEAP_SIZE: u64 = 250 * Self::ONE_MB;
     pub const GUEST_PRIVATE_INIT_HEAP_END: u64 = Self::GUEST_PRIVATE_INIT_HEAP_OFFSET + Self::GUEST_PRIVATE_INIT_HEAP_SIZE;
     pub const GUEST_PRIVATE_RUNNING_HEAP_OFFSET: u64 = Self::GUEST_PRIVATE_INIT_HEAP_END;
     pub const GUEST_PRIVATE_RUNNING_HEAP_SIZE: u64 = Self::GUEST_PRIVATE_HEAP_SIZE - Self::GUEST_PRIVATE_INIT_HEAP_SIZE;

@@ -328,7 +328,7 @@ impl VmType for VmNormal {
         Ok((kvm, vm_fd))
     }
 
-    fn vm_memory_initialize(&self, vm_fd: &VmFd) -> Result<(), Error> {
+    fn vm_memory_initialize(&mut self, vm_fd: &VmFd) -> Result<(), Error> {
         let (kmem_base, _, _) = self.vm_resources.mem_area_info(KernelArea).unwrap();
         let g_mem = self.vm_resources.mem_layout.guest_mem_size;
         let kvm_mem_region = kvm_bindings::kvm_userspace_memory_region {
@@ -380,7 +380,7 @@ impl VmType for VmNormal {
         Ok(vcpus)
     }
 
-    fn post_memory_initialize(&mut self, vm_fd: &VmFd) -> Result<(), Error> {
+    fn post_memory_initialize(&mut self, vm_fd: &mut VmFd) -> Result<(), Error> {
         Ok(())
     }
 

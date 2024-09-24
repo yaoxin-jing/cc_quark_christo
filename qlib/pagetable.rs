@@ -660,12 +660,17 @@ impl PageTables {
     pub fn MapWith2MB(&self, start: Addr, end: Addr, physical: Addr, flags: PageTableFlags,
         pagePool: &Allocator, _kernel: bool) -> Result<bool> {
         if (start.is_huge_page_aligned(HugePageType::MB2)
-            & end.is_huge_page_aligned(HugePageType::MB2)) == false {
+            && end.is_huge_page_aligned(HugePageType::MB2)) == false {
             error!("Mapping creation not possible - misaligned borders.");
             return Ok(false);
         }
         let mut res = false;
         let mut currAddr = start;
+        let table_flags = if _kernel {
+            default_table_kernel()
+        } else {
+            default_table_user()
+        };
         let pt: *mut PageTable = Self::adjust_address(self.GetRoot(), false) as *mut PageTable;
         unsafe {
             let mut l0_index = VirtAddr::new(currAddr.0).p4_index();
@@ -680,7 +685,7 @@ impl PageTables {
                     l1_table = pagePool.AllocPage(true)? as *mut PageTable;
                     let mut table = Self::adjust_address(l1_table as u64, true);
                     tee::guest_physical_address_protect(&mut table, true);
-                    l0_entry.set_addr(PhysAddr::new(table), default_table_user());
+                    l0_entry.set_addr(PhysAddr::new(table), table_flags);
                 } else {
                     let mut table_addr = tee::guest_physical_address(l0_entry.addr().as_u64());
                     l1_table = Self::adjust_address(table_addr, false) as *mut PageTable;
@@ -693,20 +698,25 @@ impl PageTables {
                         l2_table = pagePool.AllocPage(true)? as *mut PageTable;
                         let mut table = Self::adjust_address(l2_table as u64, true);
                         tee::guest_physical_address_protect(&mut table, true);
-                        l1_entry.set_addr(PhysAddr::new(table), default_table_user());
+                        l1_entry.set_addr(PhysAddr::new(table), table_flags);
                     } else {
                         let mut table_addr = tee::guest_physical_address(l1_entry.addr().as_u64());
                         l2_table = Self::adjust_address(table_addr, false) as *mut PageTable;
                     }
                     while currAddr.0 < end.0 {
+                        res = false;
                         let l2_entry = &mut (*l2_table)[l2_index];
                         let mut curr_phy_address = (currAddr.0 - start.0) + physical.0;
 
                         if l2_entry.is_unused() == false {
-                            res = self.freeEntry(l2_entry, pagePool)?;
+                            if self.freeEntry(l2_entry, pagePool)? == false {
+                                error!("Mapping - L2Entry is used / failed to free it.");
+                                return Ok(false);
+                            }
                         }
                         l2_entry.set_addr(PhysAddr::new(curr_phy_address), flags);
                         currAddr = currAddr.AddLen(MemoryDef::HUGE_PAGE_SIZE)?;
+                        res = true;
 
                         if l2_index == PageTableIndex::new(MemoryDef::ENTRY_COUNT - 1) {
                             l2_index = PageTableIndex::new(0);
@@ -714,6 +724,7 @@ impl PageTables {
                         } else {
                             l2_index = PageTableIndex::new(u16::from(l2_index) + 1);
                         }
+
                     }
                     if l1_index == PageTableIndex::new(MemoryDef::ENTRY_COUNT - 1) {
                         l1_index = PageTableIndex::new(0);
@@ -726,7 +737,7 @@ impl PageTables {
                     error!("Root table is full");
                     break;
                 } else {
-                    l1_index = PageTableIndex::new(u16::from(l1_index) + 1);
+                    l0_index = PageTableIndex::new(u16::from(l0_index) + 1);
                 }
             }
         }

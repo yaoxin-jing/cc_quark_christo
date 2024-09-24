@@ -16,7 +16,7 @@ pub mod emulcc;
 
 use kvm_ioctls::{VcpuExit, VcpuFd};
 
-use super::ConfCompExtension;
+use super::{ConfCompExtension, vm::vcpu::kvm_vcpu::Register};
 use crate::{qlib::common::Error, CCMode};
 
 
@@ -52,9 +52,8 @@ impl ConfCompExtension for NonConf<'_> {
         self.kvm_exits_list.is_some()
     }
 
-    fn set_sys_registers(&self, _vcpu_fd: &VcpuFd) -> Result<(), Error> { Ok(()) }
-
-    fn set_cpu_registers(&self, vcpu_fd: &VcpuFd) -> Result<(), Error> {
+    fn set_cpu_registers(&self, vcpu_fd: &VcpuFd, regs: Option<Vec<Register>>)
+        -> Result<(), Error> {
         self._set_cpu_registers(&vcpu_fd)
     }
 
@@ -82,9 +81,9 @@ pub mod util {
         let offset = match confidentiality_type {
             CCMode::None | CCMode::Normal =>
                 0,
-            CCMode::NormalEmu =>
+            CCMode::NormalEmu | CCMode::Realm =>
                 MemoryDef::UNIDENTICAL_MAPPING_OFFSET,
-            _ => panic!(""),
+            _ => panic!("VM: The CC-mode should specify mapping-type."),
         };
         offset
     }

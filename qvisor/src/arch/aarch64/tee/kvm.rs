@@ -17,18 +17,20 @@
 * and 'arm64: Support for Arm CCA in KVM' patch series.
 */
 
-use std::{mem::size_of, convert::TryInto};
+use std::{convert::TryInto, mem::size_of};
 
-use kvm_bindings::{kvm_enable_cap, kvm_device_type_KVM_DEV_TYPE_ARM_VGIC_V3,
-    KVM_DEV_ARM_VGIC_GRP_ADDR, KVM_VGIC_V3_ADDR_TYPE_REDIST, KVM_VGIC_V3_ADDR_TYPE_DIST,
-    KVM_VGIC_ITS_ADDR_TYPE, KVM_DEV_ARM_VGIC_GRP_CTRL, KVM_DEV_ARM_VGIC_CTRL_INIT,
-    kvm_device_attr, KVM_DEV_ARM_VGIC_GRP_NR_IRQS};
-use kvm_ioctls::{VmFd, DeviceFd, VcpuFd};
+use kvm_bindings::{
+    kvm_device_attr, kvm_device_type_KVM_DEV_TYPE_ARM_VGIC_V3, kvm_enable_cap,
+    KVM_DEV_ARM_VGIC_CTRL_INIT, KVM_DEV_ARM_VGIC_GRP_ADDR, KVM_DEV_ARM_VGIC_GRP_CTRL,
+    KVM_DEV_ARM_VGIC_GRP_NR_IRQS, KVM_VGIC_ITS_ADDR_TYPE, KVM_VGIC_V3_ADDR_TYPE_DIST,
+    KVM_VGIC_V3_ADDR_TYPE_REDIST,
+};
+use kvm_ioctls::{DeviceFd, VcpuFd, VmFd};
 use vmm_sys_util::ioctl;
 
 use crate::qlib::common::Error;
 
-use crate::runc::runtime::vm_type::realm::Realm;
+use crate::runc::runtime::vm_type::realm::realm::Realm;
 
 const KVM_VM_TYPE_ARM_SHIFT: u64 = 8;
 const KVM_VM_TYPE_ARM_MASK: u64 = (0xF as u64) << KVM_VM_TYPE_ARM_SHIFT;
@@ -36,9 +38,11 @@ const KVM_VM_TYPE_IPA_MASK: u64 = 0xFF;
 const KVM_VM_TYPE_REALM: u64 = 1;
 pub const KVM_VM_TYPE_ARM_IPA_SIZE_DEFAULT: u64 = 40;
 pub const KVM_VM_TYPE_ARM_RPV_SIZE_BYTE: u64 = 64;
-pub const KVM_VM_TYPE_ARM_REALM: u64 = (KVM_VM_TYPE_REALM << KVM_VM_TYPE_ARM_SHIFT)
-                                        & KVM_VM_TYPE_ARM_MASK;
-const KVM_ENABLE_CAP: u64 = ioctl::ioctl_expr(
+pub const KVM_VM_TYPE_ARM_REALM: u64 =
+    (KVM_VM_TYPE_REALM << KVM_VM_TYPE_ARM_SHIFT) & KVM_VM_TYPE_ARM_MASK;
+pub const KVM_ARM_RME_POPULATE_FLAGS_MEASURE: u32 = 1u32 << 0;
+
+pub const KVM_ENABLE_CAP: u64 = ioctl::ioctl_expr(
     ioctl::_IOC_WRITE,
     0xAE as u32, //KVMIO
     0xA3,
@@ -64,12 +68,13 @@ pub enum KvmCapArmRmeVm {
 
 #[repr(u64)]
 pub enum KvmArmVcpuFeature {
-    VcpuRec = 7u64,
+    HasEl2 = 7u64,  //Support nested virtualization
+    VcpuRec = 8u64, // vCPU REC state
 }
 
 #[repr(u32)]
 pub enum KvmCapArmRmeConfigRealm {
-    CfgRpv  = 0u32,
+    CfgRpv = 0u32,
     CfgHashAlgo = 1u32,
     CfgSve = 2u32,
     CfgDbg = 3u32,
@@ -95,6 +100,15 @@ pub struct KvmCapArmRmeConfigHash {
 pub struct KvmCapArmRmeInitIpaArgs {
     init_ipa_base: u64,
     init_ipa_size: u64,
+    __pad: [u32; 4],
+}
+
+#[repr(C)]
+pub struct KvmCapArmRmePopulateRealmArgs {
+    init_ipa_base: u64,
+    init_ipa_size: u64,
+    flags: u32,
+    __pad: [u32; 3],
 }
 
 impl Default for KvmCapArmRmeConfigHash {
@@ -109,9 +123,7 @@ impl Default for KvmCapArmRmeConfigHash {
 
 //// Helpers ////
 pub fn kvm_vm_arm_rme_enable_cap(vm_fd: &VmFd, cap: &mut kvm_enable_cap) -> Result<(), Error> {
-    let error = unsafe {
-        ioctl::ioctl_with_mut_ref(vm_fd, KVM_ENABLE_CAP, cap)
-    };
+    let error = unsafe { ioctl::ioctl_with_mut_ref(vm_fd, KVM_ENABLE_CAP, cap) };
     if error < 0i32 {
         let os_error = std::io::Error::last_os_error();
         error!("VM: Failed to enable cappability with error-{os_error:?}");
@@ -136,9 +148,10 @@ pub fn kvm_vm_arm_create_irq_chip(realm: &Realm, vm_fd: &VmFd) -> Result<DeviceF
     }
     let _vgic_fd = __vgic_fd.unwrap();
 
-    let _vgic_redist = kvm_bindings::kvm_device_attr{
+    let _vgic_redist = kvm_bindings::kvm_device_attr {
         group: KVM_DEV_ARM_VGIC_GRP_ADDR,
-        attr: KVM_VGIC_V3_ADDR_TYPE_REDIST.try_into()
+        attr: KVM_VGIC_V3_ADDR_TYPE_REDIST
+            .try_into()
             .expect("KVM - failed to convert KVM_VGIC_V3_ADDR_TYPE_REDIST"),
         addr: &realm.vgic3.redistributor_base as *const _ as u64,
         flags: 0,
@@ -151,7 +164,8 @@ pub fn kvm_vm_arm_create_irq_chip(realm: &Realm, vm_fd: &VmFd) -> Result<DeviceF
 
     let _vgic_dist = kvm_bindings::kvm_device_attr {
         group: KVM_DEV_ARM_VGIC_GRP_ADDR,
-        attr: KVM_VGIC_V3_ADDR_TYPE_DIST.try_into()
+        attr: KVM_VGIC_V3_ADDR_TYPE_DIST
+            .try_into()
             .expect("KVM - failed to convert KVM_VGIC_V3_ADDR_TYPE_DIST"),
         addr: &realm.vgic3.distributor_base as *const _ as u64,
         flags: 0,
@@ -184,7 +198,8 @@ pub fn kvm_vm_arm_create_its_device(realm: &Realm, vm_fd: &VmFd) -> Result<Devic
 
     let _its_attrib = kvm_bindings::kvm_device_attr {
         group: KVM_DEV_ARM_VGIC_GRP_ADDR,
-        attr: KVM_VGIC_ITS_ADDR_TYPE.try_into()
+        attr: KVM_VGIC_ITS_ADDR_TYPE
+            .try_into()
             .expect("KVM - failed to convert KVM_VGIC_ITS_ADDR_TYPE"),
         addr: &realm.vgic3.its_base as *const _ as u64,
         flags: 0,
@@ -198,7 +213,8 @@ pub fn kvm_vm_arm_create_its_device(realm: &Realm, vm_fd: &VmFd) -> Result<Devic
 
     let _its_init_attrib = kvm_bindings::kvm_device_attr {
         group: KVM_DEV_ARM_VGIC_GRP_CTRL,
-        attr: KVM_DEV_ARM_VGIC_CTRL_INIT.try_into()
+        attr: KVM_DEV_ARM_VGIC_CTRL_INIT
+            .try_into()
             .expect("KVM - failed to convert KVM_DEV_ARM_VGIC_CTRL_INIT"),
         addr: 0,
         flags: 0,
@@ -222,20 +238,23 @@ pub fn kvm_vm_arm_ipa_size(ipa_width: u64) -> u64 {
     _width & KVM_VM_TYPE_IPA_MASK
 }
 
-pub fn kvm_vm_arm_rme_init_ipa_range(vm_fd: &VmFd, base_adr: u64, size: u64) -> Result<(), Error> {
+pub fn kvm_vm_arm_rme_init_ipa_range(
+    vm_fd: &mut VmFd,
+    base_adr: u64,
+    size: u64,
+) -> Result<(), Error> {
     let mut rme_init_ipa_realm = KvmCapArmRmeInitIpaArgs {
         init_ipa_base: base_adr,
         init_ipa_size: size,
+        __pad: [0u32; 4],
     };
 
     let mut enable_cap_config: kvm_enable_cap = Default::default();
     enable_cap_config.cap = KvmCapArmRmeVm::CapRme as u32;
     enable_cap_config.args[0] = KvmCapArmRmeVm::InitIpaRealm as u64;
-    enable_cap_config.args[1] = &mut rme_init_ipa_realm as *mut KvmCapArmRmeInitIpaArgs
-         as *mut _ as u64;
-    let err = unsafe {
-        ioctl::ioctl_with_mut_ref(vm_fd, KVM_ENABLE_CAP, &mut enable_cap_config)
-    };
+    enable_cap_config.args[1] =
+        &mut rme_init_ipa_realm as *mut KvmCapArmRmeInitIpaArgs as *mut _ as u64;
+    let err = unsafe { ioctl::ioctl_with_mut_ref(vm_fd, KVM_ENABLE_CAP, &mut enable_cap_config) };
     if err < 0i32 {
         let os_error = std::io::Error::last_os_error();
         error!("VM: Failed to enable cappability with error-{os_error:?}");
@@ -244,18 +263,28 @@ pub fn kvm_vm_arm_rme_init_ipa_range(vm_fd: &VmFd, base_adr: u64, size: u64) -> 
     Ok(())
 }
 
-pub fn kvm_vm_arm_rme_populate_range(vm_fd: &VmFd, base_adr: u64, size: u64) -> Result<(), Error> {
-    let rme_init_ipa_realm: KvmCapArmRmeInitIpaArgs = KvmCapArmRmeInitIpaArgs {
+pub fn kvm_vm_arm_rme_populate_range(
+    vm_fd: &mut VmFd,
+    base_adr: u64,
+    size: u64,
+) -> Result<(), Error> {
+    let rme_init_ipa_realm: KvmCapArmRmePopulateRealmArgs = KvmCapArmRmePopulateRealmArgs {
         init_ipa_base: base_adr,
         init_ipa_size: size,
+        flags: KVM_ARM_RME_POPULATE_FLAGS_MEASURE,
+        __pad: [0u32; 3],
     };
 
     let mut enable_cap_config: kvm_enable_cap = Default::default();
     enable_cap_config.cap = KvmCapArmRmeVm::CapRme as u32;
     enable_cap_config.args[0] = KvmCapArmRmeVm::PopulateRealm as u64;
-    enable_cap_config.args[1] = &rme_init_ipa_realm as *const KvmCapArmRmeInitIpaArgs
-         as *const _ as u64;
+    enable_cap_config.args[1] =
+        &rme_init_ipa_realm as *const KvmCapArmRmePopulateRealmArgs as *const _ as u64;
     let err = unsafe {
+        info!(
+            "KVM: Populate Realm memory - start:{:#x}, size:{:#x}.",
+            base_adr, size
+        );
         ioctl::ioctl_with_mut_ref(vm_fd, KVM_ENABLE_CAP, &mut enable_cap_config)
     };
     if err < 0i32 {
@@ -268,9 +297,7 @@ pub fn kvm_vm_arm_rme_populate_range(vm_fd: &VmFd, base_adr: u64, size: u64) -> 
 
 pub fn kvm_arm_rme_vcpu_finalize(vcpu_fd: &VcpuFd) -> Result<(), Error> {
     let feature = KvmArmVcpuFeature::VcpuRec as u64;
-    let err = unsafe {
-        ioctl::ioctl_with_ref(vcpu_fd, KVM_ARM_VCPU_FINALIZE, &feature)
-    };
+    let err = unsafe { ioctl::ioctl_with_ref(vcpu_fd, KVM_ARM_VCPU_FINALIZE, &feature) };
     if err < 0i32 {
         let os_error = std::io::Error::last_os_error();
         error!("VM: Failed to enable cappability with error-{os_error:?}");
@@ -288,16 +315,19 @@ pub fn kvm_arm_vgic_init_finalize(vgic_fd: Option<&DeviceFd>, irq_lines: u64) ->
             addr: &(irq_lines as i32) as *const i32 as u64,
             flags: 0,
         };
-        _vgic_fd.set_device_attr(&vgic_init)
+        _vgic_fd
+            .set_device_attr(&vgic_init)
             .expect("KVM - vGIC failed to set IRQ lines.");
         let vgic_init = kvm_device_attr {
             group: KVM_DEV_ARM_VGIC_GRP_CTRL,
-            attr: KVM_DEV_ARM_VGIC_CTRL_INIT.try_into()
+            attr: KVM_DEV_ARM_VGIC_CTRL_INIT
+                .try_into()
                 .expect("KVM - Failed to convert KVM_DEV_ARM_VGIC_CTRL_INIT"),
             addr: 0,
             flags: 0,
         };
-        _vgic_fd.set_device_attr(&vgic_init)
+        _vgic_fd
+            .set_device_attr(&vgic_init)
             .expect("KVM - vGIC failed to init.");
     } else {
         return Err(Error::IOError(String::from("KVM - No device-fd found.")));
@@ -310,9 +340,7 @@ pub fn kvm_arm_rme_activate_realm(vm_fd: &mut VmFd) -> Result<(), Error> {
     realm_caps.cap = KvmCapArmRmeVm::CapRme as u32;
     realm_caps.args[0] = KvmCapArmRmeVm::ActivateRealm as u64;
 
-    let err = unsafe {
-        ioctl::ioctl_with_mut_ref(vm_fd, KVM_ENABLE_CAP, &mut realm_caps)
-    };
+    let err = unsafe { ioctl::ioctl_with_mut_ref(vm_fd, KVM_ENABLE_CAP, &mut realm_caps) };
     if err < 0i32 {
         let os_error = std::io::Error::last_os_error();
         error!("VM: Failed to activate Realm with error-{os_error:?}");

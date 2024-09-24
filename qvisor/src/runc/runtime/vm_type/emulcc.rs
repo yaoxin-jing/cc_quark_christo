@@ -258,7 +258,7 @@ impl VmType for VmCcEmul {
         Ok(())
     }
 
-    fn vm_memory_initialize(&self, vm_fd: &VmFd) -> Result<(), Error> {
+    fn vm_memory_initialize(&mut self, vm_fd: &VmFd) -> Result<(), Error> {
         let (kmem_base_host, kmem_base_guest, kmem_size) = self.vm_resources
             .mem_area_info(MemAreaType::KernelArea).unwrap();
         let kvm_kmem_region = kvm_bindings::kvm_userspace_memory_region {
@@ -397,7 +397,7 @@ impl VmType for VmCcEmul {
         Ok(())
     }
 
-    fn post_memory_initialize(&mut self, vm: &VmFd) -> Result<(), Error> {
+    fn post_memory_initialize(&mut self, vm: &mut VmFd) -> Result<(), Error> {
         Ok(())
     }
 

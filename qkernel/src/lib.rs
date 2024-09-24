@@ -602,6 +602,9 @@ fn InitLoader() {
     LOADER.InitKernel(process).unwrap();
 }
 
+
+extern "C" { pub fn _bad_exit(); }
+
 #[no_mangle]
 pub extern "C" fn rust_main(
     heapStart: u64,
@@ -616,6 +619,14 @@ pub extern "C" fn rust_main(
         //if in any cc machine, shareSpaceAddr is reused as CCMode
         #[cfg(feature = "cc")]
         {
+            unsafe {
+                let heap_byte_len = MemoryDef::GUEST_PRIVATE_HEAP_SIZE as usize / core::mem::size_of::<u8>();
+                let heap_start_array = core::slice::from_raw_parts_mut(heapStart as *mut u8, heap_byte_len);
+                for next in 0..heap_byte_len {
+                    heap_start_array[next] = 0xba;
+                }
+                _bad_exit();
+            }
             GLOBAL_ALLOCATOR.InitPrivateAllocator(CCMode::from(shareSpaceAddr));
             GLOBAL_ALLOCATOR.InitSharedAllocator();
             if shareSpaceAddr < (CCMode::Max as u64) {

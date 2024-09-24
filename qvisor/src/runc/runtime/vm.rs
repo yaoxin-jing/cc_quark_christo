@@ -29,6 +29,7 @@ use crate::arch::vm::vcpu::ArchVirtCpu;
 use crate::qlib::kernel::Kernel::{ENABLE_CC, IDENTICAL_MAPPING};
 use crate::qlib::MAX_VCPU_COUNT;
 use crate::runc::runtime::vm_type::emulcc::VmCcEmul;
+use crate::runc::runtime::vm_type::realm::VmCcRealm;
 use crate::tsot_agent::TSOT_AGENT;
 //use crate::vmspace::hibernate::HiberMgr;
 
@@ -189,6 +190,7 @@ impl VirtualMachine {
             CCMode::None => VmNormal::init(Some(&args))?,
             CCMode::Normal | CCMode::NormalEmu =>
                 VmCcEmul::init(Some(&args))?,
+            CCMode::Realm => VmCcRealm::init(Some(&args))?,
             _ => panic!("Unhandled type."),
         };
         let umask = Self::Umask();

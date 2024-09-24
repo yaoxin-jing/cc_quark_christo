@@ -14,7 +14,7 @@
 
 pub mod kvm_vcpu;
 
-use kvm_bindings::{kvm_vcpu_init, KVM_ARM_VCPU_PSCI_0_2};
+use kvm_bindings::{kvm_vcpu_init, KVM_ARM_VCPU_PSCI_0_2, KVM_ARM_VCPU_PTRAUTH_ADDRESS, KVM_ARM_VCPU_PTRAUTH_GENERIC};
 use kvm_ioctls::{Kvm, VcpuExit, VmFd};
 use kvm_vcpu::{Register, KvmAarch64Reg::*};
 use libc::gettid;
@@ -24,7 +24,7 @@ use crate::{arch::{tee::{NonConf, emulcc::EmulCc}, ConfCompExtension, VirtCpu},
             GetTimeCall, VcpuFeq, config::CCMode, task_mgr::TaskId}, runc::runtime::vm, syncmgr::SyncMgr, KVMVcpu, GLOCK,
             KERNEL_IO_THREAD, SHARE_SPACE, VMS};
 use super::{vcpu::kvm_vcpu::*, tee::{realm::RealmCca, kvm}};
-use std::{sync::atomic::Ordering, vec::Vec};
+use std::{sync::{atomic::Ordering, Arc}, vec::Vec};
 
 pub struct Aarch64VirtCpu {
     tcr_el1: u64,
@@ -47,7 +47,7 @@ impl VirtCpu for Aarch64VirtCpu {
         auto_start: bool, stack_size: usize, _kvm: Option<&Kvm>, conf_extension: CCMode)
         -> Result<Self, Error> {
         let _vcpu_fd = vm_fd.create_vcpu(vcpu_id as u64)
-            .expect("Failed to create kvm-vcpu with ID:{vcpu_id}");
+            .expect("Failed to create kvm-vcpu with ID:{vcpu_id:?}");
         let _ttbr0_el1 = VMS.lock().pageTables.GetRoot();
         let _vcpu_base = KVMVcpu::Init(vcpu_id, total_vcpus, entry_addr, stack_size,
             _vcpu_fd, auto_start)?;
@@ -72,7 +72,8 @@ impl VirtCpu for Aarch64VirtCpu {
 
         let mut _kvi = kvm_vcpu_init::default();
         vm_fd.get_preferred_target(&mut _kvi)
-            .map_err(|e| format!("Failed to find kvm target for vcpu - error:{:?}", e))?;
+            .map_err(|e|
+                Error::IOError((format!("Failed to find kvm target for vcpu - error:{:?}", e))))?;
         _kvi.features[0] |= 1 << KVM_ARM_VCPU_PSCI_0_2;
         _conf_comp_ext.set_vcpu_features(&mut _kvi);
 
@@ -93,8 +94,8 @@ impl VirtCpu for Aarch64VirtCpu {
 
     fn vcpu_init(&self) -> Result<(), Error> {
         self.vcpu_base.vcpu_fd.vcpu_init(&self.kvi)
-            .map_err(|e| Error::SystemErr(e.errno()))?;
-
+            .map_err(|e| Error::IOError((format!("Failed to initialize with kvi - error:{:?}",
+                    e.errno()))))?;
         Ok(())
     }
 
@@ -105,23 +106,32 @@ impl VirtCpu for Aarch64VirtCpu {
         let cntkctl_el1 = Register::Reg(CntkctlEl1, self.cntkctl_el1);
         let cpacr_el1 = Register::Reg(CpacrEl1, self.cpacr_el1);
         let sctlr_el1 = Register::Reg(SctlrEl1, self.sctlr_el1);
-        let reg_list: Vec<Register> = vec![tcr_el1, mair_el1, ttbr0_el1, cntkctl_el1,
-                                        cpacr_el1, sctlr_el1];
-        self.vcpu_base.set_regs(reg_list)?;
-        self.conf_comp_extension.set_sys_registers(&self.vcpu_base.vcpu_fd)
+        let mut reg_list: Vec<Register> = vec![mair_el1, ttbr0_el1, cntkctl_el1,
+                                        cpacr_el1, sctlr_el1, tcr_el1];
+        if self.conf_comp_extension.confidentiality_type() != CCMode::Realm {
+            KVMVcpu::set_regs(&self.vcpu_base.vcpu_fd, reg_list)?;
+            return self.conf_comp_extension.set_sys_registers(&self.vcpu_base.vcpu_fd, None)
+        } else {
+            reg_list.push(Register::Reg(X6, self.vcpu_base.topStackAddr));
+            self.conf_comp_extension.set_sys_registers(&self.vcpu_base.vcpu_fd, Some(reg_list))
+        }
     }
 
     fn initialize_cpu_registers(&self) -> Result<(), Error> {
-        let sp_el1 = Register::Reg(SpEl1, self.vcpu_base.topStackAddr);
         let pc = Register::Reg(PC, self.vcpu_base.entry);
         let x2 = Register::Reg(X2, self.vcpu_base.id as u64);
         let vdso_entry = VMS.lock().vdsoAddr;
         let x3 = Register::Reg(X3, vdso_entry);
         let x4 = Register::Reg(X4, self.vcpu_base.vcpuCnt as u64);
         let x5 = Register::Reg(X5, self.vcpu_base.autoStart as u64);
-        let reg_list = vec![sp_el1, pc, x2, x3, x4, x5];
-        self.vcpu_base.set_regs(reg_list)?;
-        self.conf_comp_extension.set_cpu_registers(&self.vcpu_base.vcpu_fd)
+        let mut reg_list = vec![pc, x2, x3, x4, x5];
+        if self.conf_comp_extension.confidentiality_type() != CCMode::Realm {
+            reg_list.push(Register::Reg(SpEl1, self.vcpu_base.topStackAddr));
+        } else {
+            reg_list.push(Register::Reg(X6, self.vcpu_base.topStackAddr));
+        }
+        KVMVcpu::set_regs(&self.vcpu_base.vcpu_fd, reg_list)?;
+        self.conf_comp_extension.set_cpu_registers(&self.vcpu_base.vcpu_fd, None)
     }
 
     fn vcpu_init_finalize(&self) -> Result<(), Error> {
@@ -381,6 +391,7 @@ impl Aarch64VirtCpu {
             let kvm_ret = match self.vcpu_base.vcpu_fd.run() {
                 Ok(ret) => ret,
                 Err(e) => {
+                    error!("vCPU - Run exited with error.");
                     if e.errno() == SysErr::EINTR {
                         self.vcpu_base.vcpu_fd.set_kvm_immediate_exit(0);
                         self.vcpu_base.dump()?;
