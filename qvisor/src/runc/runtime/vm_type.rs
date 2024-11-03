@@ -15,6 +15,8 @@
 
 pub mod noncc;
 pub mod emulcc;
+#[cfg(target_arch="aarch64")]
+pub mod realm;
 pub mod resources;
 
 use std::sync::Arc;
