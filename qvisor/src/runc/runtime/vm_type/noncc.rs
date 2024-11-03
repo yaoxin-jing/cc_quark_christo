@@ -24,7 +24,6 @@ use crate::{elf_loader::KernelELF, print::LOG, qlib, runc::runtime, tsot_agent::
 use addr::{Addr, PageOpts};
 use hashbrown::HashMap;
 use kernel::{kernel::futex, kernel::timer, task, KERNEL_STACK_ALLOCATOR, SHARESPACE};
-use kvm_bindings::kvm_enable_cap;
 use kvm_ioctls::{Cap, Kvm, VmFd};
 use pagetable::{AlignedAllocator, PageTables};
 use qlib::{addr, common::Error, kernel, linux_def::MemoryDef, pagetable};
@@ -63,8 +62,8 @@ impl VmType for VmNormal {
                 base_host: MemoryDef::HEAP_OFFSET,
                 base_guest: MemoryDef::HEAP_OFFSET,
                 size: MemoryDef::HEAP_SIZE,
-                kvm_memory_region: None,
-            });
+                guest_private: false,
+                host_backedup: true });
         _hshared_map.insert(
             MemAreaType::KernelArea,
             MemArea {
@@ -72,16 +71,16 @@ impl VmType for VmNormal {
                 base_guest: MemoryDef::PHY_LOWER_ADDR,
                 // Kernel Image + RDMA
                 size: MemoryDef::FILE_MAP_OFFSET - MemoryDef::PHY_LOWER_ADDR,
-                kvm_memory_region: None,
-            });
+                guest_private: false,
+                host_backedup: true });
         _hshared_map.insert(
             MemAreaType::FileMapArea,
             MemArea {
                 base_host: MemoryDef::FILE_MAP_OFFSET,
                 base_guest: MemoryDef::FILE_MAP_OFFSET,
                 size: MemoryDef::FILE_MAP_SIZE,
-                kvm_memory_region: None
-            });
+                guest_private: false,
+                host_backedup: true });
         #[cfg(target_arch = "aarch64")] {
             _hshared_map.insert(
                 MemAreaType::HypercallMmioArea,
@@ -89,12 +88,11 @@ impl VmType for VmNormal {
                     base_host: u64::MAX,
                     base_guest: MemoryDef::HYPERCALL_MMIO_BASE,
                     size: MemoryDef::HYPERCALL_MMIO_SIZE,
-                    kvm_memory_region: None,
-                });
+                    guest_private: false,
+                    host_backedup: false });
         }
         let mem_layout_config = MemLayoutConfig {
-            guest_private: None,
-            host_shared: _hshared_map,
+            mem_area_map: _hshared_map,
             kernel_stack_size: MemoryDef::DEFAULT_STACK_SIZE as usize,
             guest_mem_size: MemoryDef::KERNEL_MEM_INIT_REGION_SIZE * MemoryDef::ONE_GB,
         };
@@ -128,7 +126,7 @@ impl VmType for VmNormal {
     }
 
     fn create_vm(
-        self: Box<VmNormal>,
+        mut self: Box<VmNormal>,
         kernel_elf: KernelELF,
         args: Args,
     ) -> Result<VirtualMachine, Error> {
@@ -243,12 +241,11 @@ impl VmType for VmNormal {
         PMA_KEEPER.InitHugePages();
         vms.pageTables = PageTables::New(&vms.allocator)?;
 
-        let mut page_opt = PageOpts::Zero();
-        page_opt = PageOpts::Kernel();
+        let mut page_opt = PageOpts::Kernel();
         let (_, kmem_base, _) = self.vm_resources.mem_area_info(KernelArea).unwrap();
         vms.KernelMapHugeTable(Addr(kmem_base),
             Addr(kmem_base + self.vm_resources.mem_layout.guest_mem_size),
-            Addr(kmem_base), page_opt.Val(),)?;
+            Addr(kmem_base), page_opt.Val(), pagetable::HugePageType::GB1)?;
 
         #[cfg(target_arch = "aarch64")]
         {
@@ -306,7 +303,7 @@ impl VmType for VmNormal {
         Ok(())
     }
 
-    fn create_kvm_vm(&self, kvm_fd: i32) -> Result<(Kvm, VmFd), Error> {
+    fn create_kvm_vm(&mut self, kvm_fd: i32) -> Result<(Kvm, VmFd), Error> {
         let kvm = unsafe { Kvm::from_raw_fd(kvm_fd) };
 
         if !kvm.check_extension(Cap::ImmediateExit) {
@@ -329,7 +326,7 @@ impl VmType for VmNormal {
         Ok((kvm, vm_fd))
     }
 
-    fn vm_memory_initialize(&self, vm_fd: &VmFd) -> Result<(), Error> {
+    fn vm_memory_initialize(&mut self, vm_fd: &VmFd) -> Result<(), Error> {
         let (kmem_base, _, _) = self.vm_resources.mem_area_info(KernelArea).unwrap();
         let g_mem = self.vm_resources.mem_layout.guest_mem_size;
         let kvm_mem_region = kvm_bindings::kvm_userspace_memory_region {
@@ -381,15 +378,7 @@ impl VmType for VmNormal {
         Ok(vcpus)
     }
 
-    fn post_memory_initialize(&mut self) -> Result<(), Error> {
-        Ok(())
-    }
-
-    fn post_vm_initialize(&mut self) -> Result<(), Error> {
-        Ok(())
-    }
-
-    fn post_init_upadate(&mut self) -> Result<(), Error> {
-        Ok(())
+    fn get_type(&self) -> CCMode {
+        CCMode::None
     }
 }
