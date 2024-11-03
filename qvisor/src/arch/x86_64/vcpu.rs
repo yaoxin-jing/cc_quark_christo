@@ -161,7 +161,7 @@ impl VirtCpu for X86_64VirtCpu {
         self._run()
     }
 
-    fn default_hypercall_handler(&self, hypercall: u16, data: &[u8], arg0: u64, arg1: u64,
+    fn default_hypercall_handler(&self, hypercall: u16, arg0: u64, arg1: u64,
         arg2: u64, arg3: u64) -> Result<bool, Error> {
         //NOTE: Maybe not needed -> HYPERCALL_U64
         static mut FIRST: bool = true;
@@ -608,11 +608,11 @@ impl X86_64VirtCpu {
                 let (arg0, arg1, arg2, arg3) = self.conf_comp_extension
                     .get_hypercall_arguments(&self.vcpu_base.vcpu_fd, self.vcpu_base.id)?;
                 if self.conf_comp_extension.should_handle_hypercall(addr) {
-                    exit_loop = self.conf_comp_extension.handle_hypercall(addr, data, arg0, arg1,
+                    exit_loop = self.conf_comp_extension.handle_hypercall(addr, arg0, arg1,
                         arg2, arg3, self.vcpu_base.id)
                         .expect("VM run failed - cannot handle hypercall correctly.");
                 } else {
-                    exit_loop = self.default_hypercall_handler(addr, data, arg0, arg1, arg2, arg3)
+                    exit_loop = self.default_hypercall_handler(addr, arg0, arg1, arg2, arg3)
                         .expect("VM run failed - cannot handle hypercall correctly.");
                 }
             } else if self.conf_comp_extension.should_handle_kvm_exit(&kvm_ret) {
