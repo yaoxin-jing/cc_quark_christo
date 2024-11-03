@@ -15,6 +15,7 @@
 
 pub mod noncc;
 pub mod emulcc;
+pub mod realm;
 pub mod resources;
 
 use std::sync::Arc;
