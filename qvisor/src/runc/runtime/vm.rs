@@ -28,6 +28,8 @@ use crate::arch::vm::vcpu::ArchVirtCpu;
 use crate::qlib::kernel::arch::tee::get_tee_type;
 use crate::qlib::MAX_VCPU_COUNT;
 use crate::runc::runtime::vm_type::emulcc::VmCcEmul;
+#[cfg(target_arch = "aarch64")]
+use crate::runc::runtime::vm_type::realm::VmCcRealm;
 
 use super::super::super::elf_loader::*;
 use super::super::super::kvm_vcpu::*;
@@ -135,6 +137,8 @@ impl VirtualMachine {
             CCMode::None => VmNormal::init(Some(&args))?,
             CCMode::Normal | CCMode::NormalEmu =>
                 VmCcEmul::init(Some(&args))?,
+            #[cfg(target_arch = "aarch64")]
+            CCMode::Cca => VmCcRealm::init(Some(&args))?,
             _ => panic!("Unhandled type."),
         };
         let umask = Self::Umask();
@@ -189,6 +193,14 @@ impl VirtualMachine {
         let tgid = unsafe { libc::gettid() };
 
         match get_tee_type() {
+            #[cfg(target_arch = "aarch64")]
+            CCMode::Cca => {
+                self.spawn_vm_vcpus(&mut threads, 1, self.vcpus.len(), tgid);
+                //NOTE: The time delay value is randomly chosen to be just big enough
+                let wait_delay = std::time::Duration::from_millis(2000 as u64);
+                thread::sleep(wait_delay);
+                self.spawn_vm_vcpus(&mut threads, 0, 1, tgid);
+            },
             _ =>  {
                 self.spawn_vm_vcpus(&mut threads, 0, 1, tgid);
                 syncmgr::SyncMgr::WaitShareSpaceReady();
