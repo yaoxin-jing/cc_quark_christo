@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+pub mod realm;
+pub mod kvm;
 
 use kvm_ioctls::VcpuFd;
 use super::vcpu::kvm_vcpu::KvmAarch64Reg::{X0, X1, X2, X3, X4, X5};

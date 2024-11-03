@@ -13,10 +13,14 @@
 // limitations under the License.
 
 #![allow(non_upper_case_globals)]
+use std::fmt;
+
 use kvm_bindings::kvm_vcpu_events;
+use kvm_ioctls::VcpuFd;
 use crate::{KVMVcpu, qlib::common::Error, vmspace::VMSpace, qlib::backtracer};
 
 const _TCR_IPS_40BITS: u64 = 2 << 32; // PA=40
+const _TCR_IPS_42BITS: u64 = 3 << 32; //PA=42
 const _TCR_IPS_48BITS: u64 = 5 << 32; // PA=48
 const _TCR_T0SZ_OFFSET: u64 = 0;
 const _TCR_T1SZ_OFFSET: u64 = 16;
@@ -48,7 +52,7 @@ const _TCR_ORGN_WBWA: u64 = _TCR_ORGN0_WBWA |  _TCR_ORGN1_WBWA;
 const _TCR_SHARED: u64 = (3 << _TCR_SH0_SHIFT) | (3 << _TCR_SH1_SHIFT);
 const _TCR_CACHE_FLAGS: u64 = _TCR_IRGN_WBWA |  _TCR_ORGN_WBWA;
 pub const TCR_EL1_DEFAULT: u64 = _TCR_TXSZ_VA48 | _TCR_CACHE_FLAGS | _TCR_SHARED
-                                | _TCR_TG_FLAGS | _TCR_ASID16 | _TCR_IPS_40BITS;
+                                | _TCR_TG_FLAGS | _TCR_ASID16 | _TCR_IPS_42BITS;
 
 const _MT_DEVICE_nGnRnE: u64 = 0;
 const _MT_DEVICE_nGnRE: u64 = 1;
@@ -91,7 +95,7 @@ const _CPACR_EL1_FPEN: u64 = 3 << 20;
 pub const CPACR_EL1_DEFAULT: u64 = _CPACR_EL1_FPEN;
 
 #[repr(u64)]
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum KvmAarch64Reg {
     X0     = 0x6030000000100000,
     X1     = 0x6030000000100002,
@@ -102,6 +106,10 @@ pub enum KvmAarch64Reg {
     X6     = 0x603000000010000c,
     X7     = 0x603000000010000e,
     X8     = 0x6030000000100010,
+    X9     = 0x6030000000100012,
+    X10    = 0x6030000000100014,
+    X11    = 0x6030000000100016,
+    X12    = 0x6030000000100018,
     X18    = 0x6030000000100024,
     X29    = 0x603000000010003a,
     PC     = 0x6030000000100040,
@@ -119,19 +127,40 @@ pub enum KvmAarch64Reg {
     MdscrEl1    = 0x6030000000138012,
     CntkctlEl1  = 0x603000000013c708,
     TpidrEl1    = 0x603000000013c684,
+    Mpidr       = 0x603000000013c005,
 }
 
+impl fmt::Display for KvmAarch64Reg {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+#[derive(Copy, Clone)]
 pub enum Register{
-    Reg(KvmAarch64Reg, u64),
+    Reg(KvmAarch64Reg, u64)
+}
+
+impl Register {
+    pub fn val(&self) -> Option<(KvmAarch64Reg, u64)> {
+        let res = match self {
+            Register::Reg(x, y) => {
+                Some((*x, *y))
+            },
+        };
+        res
+    }
 }
 
 impl KVMVcpu {
-    pub fn set_regs(&self, reg_list: Vec<Register>) -> Result<(), Error> {
+    pub fn set_regs(vcpu_fd: &VcpuFd, reg_list: Vec<Register>) -> Result<(), Error> {
         for reg in reg_list.iter() {
             match reg {
                 Register::Reg(reg_addr, reg_val) => {
-                    self.vcpu_fd.set_one_reg(*reg_addr as u64, *reg_val)
-                        .map_err(|e| Error::SysError(e.errno()))?;
+                    debug!("VCPU: Set reg:{} - val:{:#x}", reg_addr.to_string(), *reg_val as u64);
+                    vcpu_fd.set_one_reg(*reg_addr as u64, *reg_val)
+                        .map_err(|e| Error::IOError(
+                            format!("Failed to set register - error:{}",e.errno())))?;
                 }
             }
         }
