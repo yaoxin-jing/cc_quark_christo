@@ -78,9 +78,9 @@ pub mod util {
         let offset = match confidentiality_type {
             CCMode::None | CCMode::Normal =>
                 0,
-            CCMode::NormalEmu =>
+            CCMode::NormalEmu | CCMode::Cca =>
                 MemoryDef::UNIDENTICAL_MAPPING_OFFSET,
-            _ => panic!(""),
+            _ => panic!("VM: The CC-mode should specify mapping-type."),
         };
         offset
     }
