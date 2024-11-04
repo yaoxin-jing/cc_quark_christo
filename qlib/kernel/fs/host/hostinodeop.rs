@@ -77,13 +77,9 @@ impl MappableInternal {
     pub fn WritebackPage(&self, phyAddr: u64) {
         match self.p2pmap.get(&phyAddr) {
             None => (),
-            Some((newAddr, _, writeable)) => unsafe {
+            Some((newAddr, _, writeable)) => {
                 if *writeable {
-                    core::ptr::copy_nonoverlapping(
-                        *newAddr as *const u8,
-                        phyAddr as *mut u8,
-                        PAGE_SIZE as usize,
-                    );
+                    Self::write_back(vec![(*newAddr, phyAddr, PAGE_SIZE)]);
                 }
             },
         }
@@ -91,6 +87,7 @@ impl MappableInternal {
 
     #[cfg(feature = "cc")]
     pub fn SyncWrite(&self, offset: i64, srcs: &[IoVec]) {
+        let mut write_back_set: Vec<(u64, u64, u64)> = Vec::new();
         for i in 0..srcs.len() {
             let start_page = offset as u64 & !PAGE_MASK;
             let start_offset = offset as u64 & PAGE_MASK;
@@ -110,51 +107,43 @@ impl MappableInternal {
                     };
                     let src_offset = srcs[i].start + *fileoffset + start - offset as u64;
                     let count = end - start + 1;
-                    unsafe {
-                        core::ptr::copy_nonoverlapping(
-                            (src_offset) as *const u8,
-                            (*newAddr + start) as *mut u8,
-                            count as usize,
-                        );
-                    }
+                    write_back_set.push((src_offset, *newAddr + start, count));
                 }
             }
+        }
+        if write_back_set.len() != 0 {
+            Self::write_back(write_back_set);
         }
     }
 
     #[cfg(feature = "cc")]
     pub fn WritebackAllPages(&self) {
+        let mut write_back_set: Vec<(u64, u64, u64)> = Vec::new();
         for (phyAddr, (newAddr, _, writeable)) in &self.p2pmap {
             if *writeable {
-                unsafe {
-                    core::ptr::copy_nonoverlapping(
-                        *newAddr as *const u8,
-                        *phyAddr as *mut u8,
-                        PAGE_SIZE as usize,
-                    );
-                }
+               write_back_set.push((*newAddr, *phyAddr, PAGE_SIZE));
             }
+        }
+        if write_back_set.len() != 0 {
+            Self::write_back(write_back_set);
         }
     }
 
     pub fn Clear(&mut self) {
         #[cfg(feature = "cc")]
         if is_cc_enabled() {
+            let mut write_back_set: Vec<(u64, u64, u64)> = Vec::new();
             for (phyAddr, (newAddr, _, writeable)) in &self.p2pmap {
                 if *writeable {
-                    unsafe {
-                        core::ptr::copy_nonoverlapping(
-                            *newAddr as *const u8,
-                            *phyAddr as *mut u8,
-                            PAGE_SIZE as usize,
-                        );
-                    }
+                    write_back_set.push((*newAddr, *phyAddr, PAGE_SIZE));
                 }
+            }
+            if write_back_set.len() != 0 {
+                Self::write_back(write_back_set);
             }
         }
 
         for (_offset, phyAddr) in &self.f2pmap {
-            //error!("MappableInternal clean phyAddr {:x?}/{:x?}", phyAddr, offset);
             HostSpace::MUnmap(*phyAddr, CHUNK_SIZE);
         }
     }
@@ -197,32 +186,23 @@ impl MappableInternal {
 
                 #[cfg(feature = "cc")]
                 if is_cc_enabled(){
+                    let mut write_back_set: Vec<(u64, u64, u64)> = Vec::new();
                     for i in 0..CHUNK_SIZE / PAGE_SIZE {
                         match self.p2pmap.remove(&(phyAddr + i * PAGE_SIZE)) {
                             None => (),
-                            Some((newAddr, _, writeable)) => unsafe {
+                            Some((newAddr, _, writeable)) => {
+                                debug!("VM: decrease ref on maping: copy if writeable:{:?}\
+                                    src:{:#0x} to phy{:#0x}.", writeable, newAddr, phyAddr +i*PAGE_SIZE);
                                 if writeable {
-                                    core::ptr::copy_nonoverlapping(
-                                        newAddr as *const u8,
-                                        (phyAddr + i * PAGE_SIZE) as *mut u8,
-                                        PAGE_SIZE as usize,
-                                    );
+                                    write_back_set.push((newAddr, phyAddr + (i * PAGE_SIZE), PAGE_SIZE));
                                 }
                             },
                         }
                     }
+                    if write_back_set.len() != 0 {
+                        Self::write_back(write_back_set);
+                    }
                 }
-
-                HostSpace::MUnmap(phyAddr, CHUNK_SIZE);
-
-                /*error!("DecrRefOn 1 {:x}/{:x}", phyAddr,  phyAddr + CHUNK_SIZE);
-                let mut curr = phyAddr;
-                while curr < phyAddr + CHUNK_SIZE {
-                    Clflush(curr);
-                    error!("DecrRefOn 1.1 {:x}", curr);
-                    curr += 64;
-                }
-                error!("DecrRefOn 2");*/
                 self.f2pmap.remove(&chunkStart);
             } else if refs > 0 {
                 self.chunkrefs.insert(chunkStart, refs);
@@ -236,6 +216,36 @@ impl MappableInternal {
             }
 
             chunkStart += CHUNK_SIZE;
+        }
+    }
+
+    fn write_back(range_set: Vec<(u64, u64, u64)>) {
+        #[cfg(target_arch = "aarch64")]
+        let mut file_ranges: alloc::boxed::Box<Vec<Range>,
+            crate::qlib::mem::cc_allocator::GuestHostSharedAllocator> =
+            alloc::boxed::Box::new_in(Vec::with_capacity(range_set.len()),
+            crate::GUEST_HOST_SHARED_ALLOCATOR);
+        let mut guest_address: u64;
+        let mut shared_address: u64;
+        let mut count: u64;
+        for pair in range_set.iter() {
+            (guest_address, shared_address, count) = (pair.0, pair.1, pair.2);
+            unsafe {
+                // All execpt Arm-CCA map the file in file-map area, copy content
+                // from guest is sufficient to reflect changes.
+                core::ptr::copy_nonoverlapping(guest_address as *const u8,
+                    shared_address as *mut u8, count as usize);
+            }
+            #[cfg(target_arch = "aarch64")]
+            if crate::qlib::kernel::arch::tee::is_hw_tee() {
+                file_ranges.push(Range{start: shared_address, len: count});
+            }
+        }
+        // On Arm we use read to get the file contect in file-map area,
+        // the host should write back.
+        #[cfg(target_arch = "aarch64")]
+        if crate::qlib::kernel::arch::tee::is_hw_tee() {
+            HostSpace::WriteBack(file_ranges);
         }
     }
 }

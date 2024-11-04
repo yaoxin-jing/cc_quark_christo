@@ -29,6 +29,8 @@ pub enum Msg {
     LoadProcessKernel(LoadProcessKernel),
     GetStdfds(GetStdfds),
     CreateMemfd(CreateMemfd),
+    #[cfg(target_arch = "aarch64")]
+    WriteBack(WriteBack),
 
     //Syscall
     Fallocate(Fallocate),
@@ -926,6 +928,12 @@ pub struct WriteControlMsgResp {
     pub addr: u64,
     pub len: usize,
     pub close: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct WriteBack {
+    pub range_set_address: u64,
+    pub size: usize,
 }
 
 pub struct Print<'a> {
