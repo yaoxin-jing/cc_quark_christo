@@ -553,3 +553,13 @@ pub unsafe fn pan_set(val: bool) {
         asm!("msr pan, #0");
     }
 }
+
+#[inline]
+pub fn read_tcr_el1() -> u64 {
+    let ret: u64;
+    unsafe {
+        asm!("mrs {0}, tcr_el1",
+            out(reg) ret);
+    }
+    ret
+}
