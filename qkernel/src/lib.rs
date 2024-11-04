@@ -20,8 +20,6 @@
 #![allow(deref_nullptr)]
 #![allow(non_snake_case)]
 #![allow(bare_trait_objects)]
-//#![feature(const_raw_ptr_to_usize_cast)]
-//#![feature(const_fn)]
 #![feature(allocator_api)]
 #![feature(associated_type_bounds)]
 #![feature(maybe_uninit_uninit_array)]
@@ -66,15 +64,12 @@ use crate::qlib::kernel::GlobalIOMgr;
 #[cfg(feature = "cc")]
 use crate::qlib::ShareSpace;
 
-//use self::qlib::buddyallocator::*;
 use self::asm::*;
 use self::boot::controller::*;
 use self::boot::loader::*;
 use self::kernel::timer::*;
 use self::kernel_def::*;
 use self::loader::vdso::*;
-//use linked_list_allocator::LockedHeap;
-//use buddy_system_allocator::LockedHeap;
 use self::qlib::common::*;
 use self::qlib::config::*;
 use self::qlib::control_msg::*;
@@ -90,11 +85,10 @@ use self::qlib::kernel::memmgr;
 use self::qlib::kernel::perflog;
 use self::qlib::kernel::quring;
 use self::qlib::kernel::Kernel;
-#[cfg (feature = "cc")]
-use self::qlib::kernel::Kernel::{ENABLE_CC, is_cc_enabled};
+#[cfg(feature = "cc")]
+use self::qlib::kernel::Kernel::{is_cc_enabled, ENABLE_CC};
 use self::qlib::kernel::*;
 use self::qlib::{ShareSpaceRef, SysCallID};
-//use self::vcpu::*;
 use self::qlib::kernel::socket;
 use self::qlib::kernel::task;
 use self::qlib::kernel::taskMgr;
@@ -146,7 +140,7 @@ pub static GLOBAL_ALLOCATOR: HostAllocator = HostAllocator::New();
 //pub static GLOBAL_ALLOCATOR: BitmapAllocatorWrapper = BitmapAllocatorWrapper::New();
 
 #[cfg(feature = "cc")]
-pub static  IS_GUEST: bool = true;
+pub static IS_GUEST: bool = true;
 #[cfg(feature = "cc")]
 pub static GUEST_HOST_SHARED_ALLOCATOR: GuestHostSharedAllocator = GuestHostSharedAllocator::New();
 
@@ -156,7 +150,8 @@ lazy_static! {
 
 #[cfg(feature = "cc")]
 lazy_static! {
-    pub static ref PRIVATE_VCPU_ALLOCATOR: Box<PrivateVcpuAllocators> = Box::new(PrivateVcpuAllocators::New());
+    pub static ref PRIVATE_VCPU_ALLOCATOR: Box<PrivateVcpuAllocators> =
+        Box::new(PrivateVcpuAllocators::New());
     pub static ref PAGE_MGR_HOLDER: Box<PageMgr> = Box::new(PageMgr::default());
     pub static ref IO_URING_HOLDER: Box<QUring> = Box::new(QUring::New(MemoryDef::QURING_SIZE));
     pub static ref GUEST_KERNEL: Mutex<Option<kernel::kernel::Kernel>> = Mutex::new(None);
@@ -181,14 +176,15 @@ pub fn SingletonInit() {
         // the error! can run after this point
         //error!("error message");
 
-        #[cfg(not(feature = "cc"))]{
+        #[cfg(not(feature = "cc"))]
+        {
             SHARESPACE.SetSignalHandlerAddr(SignalHandler as u64);
             PAGE_MGR.SetValue(SHARESPACE.GetPageMgrAddr());
             IOURING.SetValue(SHARESPACE.GetIOUringAddr());
         }
 
         #[cfg(feature = "cc")]
-        if is_cc_enabled(){
+        if is_cc_enabled() {
             PAGE_MGR.SetValue(PAGE_MGR_HOLDER.Addr());
             IOURING.SetValue(IO_URING_HOLDER.Addr());
         } else {
@@ -542,7 +538,7 @@ pub fn MainRun(currTask: &mut Task, mut state: TaskRunState) {
                     thread.lock().memoryMgr = currTask.mm.clone();
                     #[cfg(not(feature = "cc"))]
                     CPULocal::SetPendingFreeStack(currTask.taskId);
-                    #[cfg (feature = "cc")]
+                    #[cfg(feature = "cc")]
                     CPULocal::SetPendingFreeStack(currTask.taskId, currTask.taskWrapperId);
 
                     /*if !SHARESPACE.config.read().KernelPagetable {
@@ -602,6 +598,16 @@ fn InitLoader() {
     LOADER.InitKernel(process).unwrap();
 }
 
+#[cfg(target_arch = "aarch64")]
+use core::sync::atomic::AtomicU64;
+#[cfg(target_arch = "aarch64")]
+extern "C" {
+    pub fn _smc_exit();
+    pub fn _bad_hcall();
+    static BOOT_VCPU_PC: AtomicU64;
+    static BOOT_HELP_DATA: AtomicU64;
+}
+
 #[no_mangle]
 pub extern "C" fn rust_main(
     heapStart: u64,
@@ -622,12 +628,19 @@ pub extern "C" fn rust_main(
             if mode != CCMode::None {
                 crate::qlib::kernel::arch::tee::set_tee_type(mode);
                 ENABLE_CC.store(true, Ordering::Release);
+
                 GLOBAL_ALLOCATOR.InitSharedAllocator_cc();
+
                 let size = core::mem::size_of::<ShareSpace>();
-                let shared_space = unsafe {
-                    GLOBAL_ALLOCATOR.AllocSharedBuf(size, 2)
-                };
-                HyperCall64(qlib::HYPERCALL_SHARESPACE_INIT, shared_space as u64, 0, 0, 0);
+                let shared_space = unsafe { GLOBAL_ALLOCATOR.AllocSharedBuf(size, 2) };
+
+                HyperCall64(
+                    qlib::HYPERCALL_SHARESPACE_INIT,
+                    shared_space as u64,
+                    0,
+                    0,
+                    0,
+                );
                 SHARESPACE.SetValue(shared_space as u64);
             } else {
                 SHARESPACE.SetValue(shareSpaceAddr);
@@ -663,6 +676,18 @@ pub extern "C" fn rust_main(
 
         // release other vcpus
         HyperCall64(qlib::HYPERCALL_RELEASE_VCPU, 0, 0, 0, 0);
+        match crate::qlib::kernel::arch::tee::get_tee_type() {
+            #[cfg(target_arch = "aarch64")]
+            CCMode::Cca => {
+                 unsafe {
+                     let boot_help_data = BOOT_HELP_DATA.load(Ordering::Relaxed);
+                     let boot_vcpu_pc = BOOT_VCPU_PC.load(Ordering::Relaxed);
+                     arch::tee::boot_others(boot_help_data, vcpuCnt, boot_vcpu_pc);
+                 }
+            }
+            _ => {},
+        }
+
     } else {
         set_cpu_local(id);
         //PerfGoto(PerfType::Kernel);
@@ -690,11 +715,12 @@ pub extern "C" fn rust_main(
         //error!("start main: {}", ::AllocatorPrint(10));
 
         //ALLOCATOR.Print();
+        debug!("QK: vCPU-0 started - IOWait");
         IOWait();
     };
 
     if id == 1 {
-        debug!("heap start is {:x}", heapStart);
+        debug!("QK: vCPU-1: heap start is {:x}", heapStart);
         self::Init();
         if autoStart {
             CreateTask(StartRootContainer as u64, ptr::null(), false);
@@ -703,7 +729,8 @@ pub extern "C" fn rust_main(
     }
     #[cfg(feature = "cc")]
     if id == 2 {
-        if is_cc_enabled(){
+        if is_cc_enabled() {
+            debug!("QK: vCPU-2: started IoHandler.");
             IoHanlder();
         }
     }

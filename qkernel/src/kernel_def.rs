@@ -23,9 +23,9 @@ use crate::qlib::fileinfo::*;
 #[cfg(target_arch = "aarch64")]
 use crate::qlib::kernel::arch::tee::is_hw_tee;
 
+use self::kernel::dns::dns_svc::DnsSvc;
 use self::kernel::socket::hostinet::tsot_mgr::TsotSocketMgr;
 use self::tsot_msg::TsotMessage;
-use self::kernel::dns::dns_svc::DnsSvc;
 use super::qlib::kernel::asm::*;
 use super::qlib::kernel::quring::uring_async::UringAsyncMgr;
 use super::qlib::kernel::taskMgr::*;
@@ -53,21 +53,20 @@ use super::qlib::*;
 use super::syscalls::sys_file::*;
 use super::Kernel::HostSpace;
 
-
 use crate::GLOBAL_ALLOCATOR;
 
 #[cfg(feature = "cc")]
-use crate::PRIVATE_VCPU_ALLOCATOR;
-#[cfg (feature = "cc")]
 use super::qlib::qmsg::sharepara::*;
-#[cfg (feature = "cc")]
-use Kernel::is_cc_enabled;
-#[cfg (feature = "cc")]
-use crate::GUEST_HOST_SHARED_ALLOCATOR;
-#[cfg (feature = "cc")]
-use alloc::boxed::Box;
-#[cfg (feature = "cc")]
+#[cfg(feature = "cc")]
 use crate::qlib::config::CCMode;
+#[cfg(feature = "cc")]
+use crate::GUEST_HOST_SHARED_ALLOCATOR;
+#[cfg(feature = "cc")]
+use crate::PRIVATE_VCPU_ALLOCATOR;
+#[cfg(feature = "cc")]
+use alloc::boxed::Box;
+#[cfg(feature = "cc")]
+use Kernel::is_cc_enabled;
 
 impl OOMHandler for ListAllocator {
     fn handleError(&self, size: u64, alignment: u64) {
@@ -197,12 +196,20 @@ pub fn switch(from: TaskId, to: TaskId) {
     fromCtx.mm.VcpuLeave();
     toCtx.mm.VcpuEnter();
 
-    assert!(from.task_wrapper_addr > 0, "switch from.task_wrapper_addr > 0");
+    assert!(
+        from.task_wrapper_addr > 0,
+        "switch from.task_wrapper_addr > 0"
+    );
     assert!(to.task_wrapper_addr > 0, "switch to.task_wrapper_addr > 0");
 
     unsafe {
         // rdi, rsi, rdx, rcx, r8, r9
-        context_swap_cc(fromCtx.GetContext(), toCtx.GetContext(), from.task_wrapper_addr, to.task_wrapper_addr);
+        context_swap_cc(
+            fromCtx.GetContext(),
+            toCtx.GetContext(),
+            from.task_wrapper_addr,
+            to.task_wrapper_addr,
+        );
     }
 
     //Task::Current().PerfGofrom(PerfType::Blocked);
@@ -259,9 +266,7 @@ pub fn Invlpg(addr: u64) {
 #[inline(always)]
 fn _hcall_prepare_shared_buff(vcpu_id: usize, arg0: u64, arg1: u64, arg2: u64, arg3: u64) {
     let shared_buff_addr = MemoryDef::HYPERCALL_PARA_PAGE_OFFSET as *mut ShareParaPage;
-    let shared_buff = unsafe {
-        &mut (*shared_buff_addr).SharePara[vcpu_id]
-    };
+    let shared_buff = unsafe { &mut (*shared_buff_addr).SharePara[vcpu_id] };
 
     shared_buff.para1 = arg0;
     shared_buff.para2 = arg1;
@@ -291,7 +296,7 @@ pub fn HyperCall64(type_: u16, para1: u64, para2: u64, para3: u64, para4: u64) {
         let vcpu_id = if type_ != crate::qlib::HYPERCALL_SHARESPACE_INIT {
             GetVcpuId()
         } else {
-             0
+            0
         };
         _hcall_prepare_shared_buff(vcpu_id, para1, para2, para3, para4);
         let dummy_data: u8 = 0;
@@ -330,16 +335,25 @@ pub fn HyperCall64(type_: u16, para1: u64, para2: u64, para3: u64, para4: u64) {
         let vcpu_id = if type_ != crate::qlib::HYPERCALL_SHARESPACE_INIT {
             GetVcpuId()
         } else {
-             0
+            0
         };
         _hcall_prepare_shared_buff(vcpu_id, para1, para2, para3, para4);
-        let dummy_data: u8 = 0;
-        let hcall_id = MemoryDef::HYPERCALL_MMIO_BASE + type_ as u64;
-        unsafe {
-            asm!("str w1, [x0]",
-                 in("x0") hcall_id,
-                 in("w1") dummy_data,
-            )
+
+        let hcall_id = MemoryDef::HYPERCALL_MMIO_BASE as u64 + type_ as u64;
+        //
+        //TODO: We can remove the call_host when MMIO is tested to work
+        //
+        if is_hw_tee() == false {
+            let dummy_data: u8 = 0;
+            unsafe {
+                asm!("str w1, [x0]",
+                    in("x0") hcall_id,
+                    in("w1") dummy_data,
+                )
+            }
+        } else {
+            use crate::qlib::kernel::arch::tee::call_host;
+            call_host(hcall_id, para1, para2, para3, para4);
         }
     }
 }
@@ -557,7 +571,7 @@ impl HostAllocator {
     #[cfg(feature = "cc")]
     pub fn InitPrivateAllocator(&self, mode: CCMode) {
         match mode {
-            CCMode::NormalEmu => {
+            CCMode::NormalEmu | CCMode::Cca => {
                 crate::qlib::kernel::Kernel::IDENTICAL_MAPPING.store(false, Ordering::SeqCst);
                 self.guestPrivHeapAddr.store(
                     MemoryDef::GUEST_PRIVATE_RUNNING_HEAP_OFFSET,
@@ -581,10 +595,10 @@ impl HostAllocator {
         }
     }
 
-
     #[cfg(feature = "cc")]
     pub fn InitSharedAllocator(&self) {
-        self.sharedHeapAddr.store(MemoryDef::GUEST_HOST_SHARED_HEAP_OFFSET, Ordering::SeqCst);
+        self.sharedHeapAddr
+            .store(MemoryDef::GUEST_HOST_SHARED_HEAP_OFFSET, Ordering::SeqCst);
     }
 
     #[cfg(feature = "cc")]
@@ -592,18 +606,18 @@ impl HostAllocator {
         let sharedHeapStart = self.sharedHeapAddr.load(Ordering::Relaxed);
         let shaedHeapEnd = sharedHeapStart + MemoryDef::GUEST_HOST_SHARED_HEAP_SIZE as u64;
         *self.GuestHostSharedAllocator() = ListAllocator::New(sharedHeapStart as _, shaedHeapEnd);
-
-
-        // reserve 4 pages for the listAllocator and share para page
         let size = 4 * MemoryDef::PAGE_SIZE as usize;
-        self.GuestHostSharedAllocator().Add(MemoryDef::GUEST_HOST_SHARED_HEAP_OFFSET as usize + size,
-            MemoryDef::GUEST_HOST_SHARED_HEAP_SIZE as usize - size);
+        self.GuestHostSharedAllocator().Add(
+            MemoryDef::GUEST_HOST_SHARED_HEAP_OFFSET as usize + size,
+            MemoryDef::GUEST_HOST_SHARED_HEAP_SIZE as usize - size,
+        );
     }
 
     #[cfg(not(feature = "cc"))]
     pub fn Init(&self, heapAddr: u64) {
         self.listHeapAddr.store(heapAddr, Ordering::SeqCst);
-        self.ioHeapAddr.store(heapAddr + MemoryDef::HEAP_SIZE, Ordering::SeqCst)
+        self.ioHeapAddr
+            .store(heapAddr + MemoryDef::HEAP_SIZE, Ordering::SeqCst)
     }
 }
 
@@ -614,7 +628,6 @@ unsafe impl GlobalAlloc for HostAllocator {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        
         let addr = ptr as u64;
         if !Self::IsIOBuf(addr) {
             self.Allocator().dealloc(ptr, layout);
@@ -705,7 +718,6 @@ unsafe impl GlobalAlloc for GlobalVcpuAllocator {
     }
 }
 
-
 impl UringAsyncMgr {
     pub fn FreeSlot(&self, id: usize) {
         self.freeSlot(id);
@@ -732,9 +744,9 @@ pub fn ReapSwapIn() {
 
 impl TsotSocketMgr {
     pub fn SendMsg(m: &TsotMessage) -> Result<()> {
-        let res = HostSpace::TsotSendMsg(m as * const _ as u64);
+        let res = HostSpace::TsotSendMsg(m as *const _ as u64);
         if res == 0 {
-            return Ok(())
+            return Ok(());
         }
 
         return Err(Error::SysError(SysErr::EINVAL));
@@ -742,9 +754,9 @@ impl TsotSocketMgr {
 
     pub fn RecvMsg() -> Result<TsotMessage> {
         let mut m = TsotMessage::default();
-        let res = HostSpace::TsotRecvMsg(&mut m as * mut _ as u64);
+        let res = HostSpace::TsotRecvMsg(&mut m as *mut _ as u64);
         if res == 0 {
-            return Ok(m)
+            return Ok(m);
         }
 
         return Err(Error::SysError(SysErr::EINVAL));
