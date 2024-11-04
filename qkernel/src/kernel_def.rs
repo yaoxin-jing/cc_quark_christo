@@ -20,6 +20,8 @@ use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 
 use crate::qlib::fileinfo::*;
+#[cfg(target_arch = "aarch64")]
+use crate::qlib::kernel::arch::tee::is_hw_tee;
 
 use self::kernel::socket::hostinet::tsot_mgr::TsotSocketMgr;
 use self::tsot_msg::TsotMessage;
@@ -49,7 +51,6 @@ use super::qlib::ShareSpace;
 use super::qlib::*;
 use super::syscalls::sys_file::*;
 use super::Kernel::HostSpace;
-
 
 use crate::GLOBAL_ALLOCATOR;
 
@@ -299,16 +300,25 @@ pub fn HyperCall64(type_: u16, para1: u64, para2: u64, para3: u64, para4: u64) {
         let vcpu_id = if type_ != crate::qlib::HYPERCALL_SHARESPACE_INIT {
             GetVcpuId()
         } else {
-             0
+            0
         };
         _hcall_prepare_shared_buff(vcpu_id, para1, para2, para3, para4);
-        let dummy_data: u8 = 0;
-        let hcall_id = MemoryDef::HYPERCALL_MMIO_BASE + type_ as u64;
-        unsafe {
-            asm!("str w1, [x0]",
-                 in("x0") hcall_id,
-                 in("w1") dummy_data,
-            )
+
+        let hcall_id = MemoryDef::HYPERCALL_MMIO_BASE as u64 + type_ as u64;
+        //
+        //TODO: We can remove the call_host when MMIO is tested to work
+        //
+        if is_hw_tee() == false {
+            let dummy_data: u8 = 0;
+            unsafe {
+                asm!("str w1, [x0]",
+                    in("x0") hcall_id,
+                    in("w1") dummy_data,
+                )
+            }
+        } else {
+            use crate::qlib::kernel::arch::tee::call_host;
+            call_host(hcall_id, para1, para2, para3, para4);
         }
     }
 }
@@ -472,7 +482,7 @@ impl HostAllocator {
 
     pub fn InitPrivateAllocator(&self, mode: CCMode) {
         match mode {
-            CCMode::NormalEmu => {
+            CCMode::NormalEmu | CCMode::Cca => {
                 crate::qlib::kernel::Kernel::IDENTICAL_MAPPING.store(false, Ordering::SeqCst);
                 self.guestPrivHeapAddr.store(
                     MemoryDef::GUEST_PRIVATE_RUNNING_HEAP_OFFSET,
