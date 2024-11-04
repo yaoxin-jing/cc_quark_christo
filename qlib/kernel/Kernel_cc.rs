@@ -30,6 +30,7 @@ use super::Kernel::*;
 use crate::kernel_def::HyperCall64;
 use crate::qlib::control_msg::ControlMsg;
 use crate::qlib::proxy::*;
+use crate::qlib::mem::cc_allocator;
 use crate::GLOBAL_ALLOCATOR;
 use crate::GUEST_HOST_SHARED_ALLOCATOR;
 
@@ -68,6 +69,15 @@ impl HostSpace {
 
             return HostSpace::Call(&mut msg, false) as i64;
         }
+    }
+
+    pub fn WriteBack(ranges: Box<Vec<Range>, cc_allocator::GuestHostSharedAllocator>) {
+        let sh_space_addr = ranges.as_ptr() as *const u64 as u64;
+        let mut msg = Box::new_in(Msg::WriteBack(WriteBack {
+            range_set_address: sh_space_addr,
+            size: ranges.len() }),
+            GUEST_HOST_SHARED_ALLOCATOR);
+        let _ = HostSpace::Call(&mut msg, false);
     }
 
     pub fn CreateMemfd(len: i64, flags: u32) -> i64 {

@@ -67,6 +67,10 @@ impl KVMVcpu {
             Msg::CreateMemfd(msg) => {
                 ret = super::VMSpace::CreateMemfd(msg.len, msg.flags) as u64;
             }
+            Msg::WriteBack(msg) => {
+                ret = super::PMA_KEEPER.write_back(msg.range_set_address, msg.size);
+
+            }
             //Syscall
             Msg::Fallocate(msg) => {
                 ret = super::VMSpace::Fallocate(msg.fd, msg.mode, msg.offset, msg.len) as u64;
