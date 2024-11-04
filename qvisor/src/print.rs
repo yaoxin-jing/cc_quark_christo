@@ -43,9 +43,9 @@ pub fn SetSyncPrint(syncPrint: bool) {
     LOG.SetSyncPrint(syncPrint);
 }
 
-pub const LOG_FILE_DEFAULT: &str = "/var/log/quark/quark.log";
-pub const RAWLOG_FILE_DEFAULT: &str = "/var/log/quark/raw.log";
-pub const LOG_FILE_FORMAT: &str = "/var/log/quark/{}.log";
+pub const LOG_FILE_DEFAULT: &str = "/home/realm/Quark/log/quark.log";
+pub const RAWLOG_FILE_DEFAULT: &str = "/home/realm/Quark/log/raw.log";
+pub const LOG_FILE_FORMAT: &str = "/home/realm/Quark/log/{}.log";
 pub const TIME_FORMAT: &str = "%H:%M:%S%.3f";
 
 pub const MEMORY_LEAK_LOG: bool = false;
@@ -82,7 +82,7 @@ impl Log {
     }
 
     pub fn Reset(&self, name: &str) {
-        let filename = format!("/var/log/quark/{}.log", name);
+        let filename = format!("/home/realm/Quark/log/{}.log", name);
         let file = OpenOptions::new()
             .create(true)
             .append(true)
