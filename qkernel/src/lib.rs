@@ -149,7 +149,7 @@ pub static VCPU_ALLOCATOR: GlobalVcpuAllocator = GlobalVcpuAllocator::New();
 
 pub static GLOBAL_ALLOCATOR: HostAllocator = HostAllocator::New();
 
-pub static  IS_GUEST: bool = true;
+pub static IS_GUEST: bool = true;
 pub static SHARED_ALLOCATOR : GlobalVcpuSharedAllocator = GlobalVcpuSharedAllocator::New();
 pub static GUEST_HOST_SHARED_ALLOCATOR: GuestHostSharedAllocator = GuestHostSharedAllocator::New();
 
@@ -623,6 +623,15 @@ fn InitLoader() {
     LOADER.InitKernel(process).unwrap();
 }
 
+#[cfg(target_arch = "aarch64")]
+use core::sync::atomic::AtomicU64;
+#[cfg(target_arch = "aarch64")]
+extern "C" {
+    pub fn _smc_exit();
+    static BOOT_VCPU_PC: AtomicU64;
+    static BOOT_HELP_DATA: AtomicU64;
+}
+
 #[no_mangle]
 pub extern "C" fn rust_main(
     heapStart: u64,
@@ -678,6 +687,18 @@ pub extern "C" fn rust_main(
 
         // release other vcpus
         HyperCall64(qlib::HYPERCALL_RELEASE_VCPU, 0, 0, 0, 0);
+        match crate::qlib::kernel::arch::tee::get_tee_type() {
+            #[cfg(target_arch = "aarch64")]
+            CCMode::Cca => {
+                 unsafe {
+                     let boot_help_data = BOOT_HELP_DATA.load(Ordering::Relaxed);
+                     let boot_vcpu_pc = BOOT_VCPU_PC.load(Ordering::Relaxed);
+                     arch::tee::boot_others(boot_help_data, vcpuCnt, boot_vcpu_pc);
+                 }
+            }
+            _ => {},
+        }
+
     } else {
         set_cpu_local(id);
         //PerfGoto(PerfType::Kernel);
@@ -701,11 +722,12 @@ pub extern "C" fn rust_main(
     /***************** can't run any qcall before this point ************************************/
 
     if id == 0 {
+        debug!("VM: vCPU-0 started - IOWait");
         IOWait();
     };
 
     if id == 1 {
-        debug!("heap starts at:{:#x}", heapStart);
+        debug!("VM: vCPU-1: heap start is {:x}", heapStart);
         self::Init();
         if autoStart {
             CreateTask(StartRootContainer as u64, ptr::null(), false);
