@@ -12,6 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(target_arch = "aarch64")]
+#[path = "./aarch64/tee/realm.rs"]
+pub mod realm;
+
+//NOTE: When x86 comes with its own implementation, we will
+//      remove the arch-guards inside the functions.
+#[cfg(target_arch = "aarch64")]
+use self::realm as _tee;
+
 use core::sync::atomic::{AtomicU8, Ordering};
 use lazy_static::lazy_static;
 use crate::qlib::linux_def::MemoryDef;
@@ -64,9 +73,8 @@ pub fn is_cc_active() -> bool {
 /// bit(s) on the GPA is implementation defined by the particular TEE.
 pub fn gpa_adjust_shared_bit(_address: &mut u64, _protect: bool) {
     if is_hw_tee() {
-        //
-        // Impliment according to architecture
-        //
+        #[cfg(target_arch = "aarch64")]
+        _tee::ipa_adjust(_address, _protect);
     }
 }
 
@@ -76,9 +84,8 @@ pub fn guest_physical_address(ipa_address: u64) -> u64 {
     #![allow(unused_mut)]
     let mut address_guest = ipa_address;
     if is_hw_tee() {
-        //
-        // Impliment according to architecture
-        //
+        #[cfg(target_arch = "aarch64")]
+        _tee::unset_shared_bit(&mut address_guest);
     }
     address_guest
 }
@@ -102,15 +109,13 @@ pub fn is_protected_address(gpa: u64) -> bool {
 /// Usage: On aarch64-Realm - invoke Hypercall
 /// NOTE: Unstable signature - may change in the future.
 pub fn call_host(_hcall_type: u64, _arg1: u64, _arg2: u64, _arg3: u64, _arg4: u64) {
-        //
-        // Impliment according to architecture
-        //
+    #[cfg(target_arch = "aarch64")]
+    _tee::rsi::RsiHostCall::rsi_host_call(_hcall_type, _arg1, _arg2, _arg3, _arg4);
 }
 
 /// Entry call to the booting flow of other vCPUS.
 /// Internals are architecture depended.
 pub fn boot_others(_boot_help_data: u64, _vcpu_count: u64, _pc: u64) {
-        //
-        // Impliment according to architecture
-        //
+    #[cfg(target_arch = "aarch64")]
+    _tee::psci::cpu_on(_boot_help_data as *const u64, _vcpu_count, _pc);
 }
