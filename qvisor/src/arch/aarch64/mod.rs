@@ -13,3 +13,4 @@
 // limitations under the License.
 pub mod vcpu;
 pub mod tee;
+pub mod kvm;
