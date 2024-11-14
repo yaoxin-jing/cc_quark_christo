@@ -69,9 +69,17 @@ pub fn is_cc_active() -> bool {
 /// bit(s) on the GPA is implementation defined by the particular TEE.
 pub fn gpa_adjust_shared_bit(_address: &mut u64, _protect: bool) {
     if is_hw_tee() {
-        //
-        // Impliment according to architecture
-        //
+        match get_tee_type() {
+            #[cfg(feature = "snp")]
+            CCMode::SevSnp => {
+                if _protect {
+                    *_address |= sev_snp::C_BIT_MASK.load(Ordering::Acquire);
+                } else {
+                    *_address &= sev_snp::C_BIT_MASK.load(Ordering::Acquire) -1;
+                }
+            }
+            _ =>(),
+        }
     }
 }
 
@@ -81,9 +89,13 @@ pub fn guest_physical_address(ipa_address: u64) -> u64 {
     #![allow(unused_mut)]
     let mut address_guest = ipa_address;
     if is_hw_tee() {
-        //
-        // Impliment according to architecture
-        //
+        match get_tee_type() {
+            #[cfg(feature = "snp")]
+            CCMode::SevSnp => {
+                address_guest &= sev_snp::C_BIT_MASK.load(Ordering::Acquire) -1;
+            }
+            _ =>(),
+        };
     }
     address_guest
 }
