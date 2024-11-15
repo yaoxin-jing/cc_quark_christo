@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(target_arch = "x86_64")]
+#[cfg(feature = "snp")]
+#[path = "./x86_64/tee/sev_snp/mod.rs"]
+pub mod sev_snp;
+
 use core::sync::atomic::{AtomicU8, Ordering};
 use lazy_static::lazy_static;
 use crate::qlib::linux_def::MemoryDef;

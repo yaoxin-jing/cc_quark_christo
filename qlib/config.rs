@@ -161,7 +161,10 @@ impl CCMode {
     }
 
     pub fn tee_backedup(_cc_type: u64) -> bool {
-        false
+        match CCMode::from(_cc_type) {
+            CCMode::SevSnp => true,
+            _ => false,
+        }
     }
 }
 

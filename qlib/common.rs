@@ -461,6 +461,9 @@ pub enum Error {
 
     StdIOErr(String),
     UUidError(String),
+
+    //Set ccmode which hardware does not support
+    CCModeError,
 }
 
 impl Error {
