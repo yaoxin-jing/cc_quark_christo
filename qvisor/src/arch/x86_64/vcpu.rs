@@ -17,7 +17,7 @@ pub mod kvm_vcpu;
 use kvm_ioctls::{Kvm, VcpuExit, VmFd};
 use kvm_bindings::{kvm_regs, kvm_sregs, kvm_xcrs, KVM_MAX_CPUID_ENTRIES};
 use libc::gettid;
-use std::{os::fd::RawFd, convert::TryInto, mem::size_of, sync::atomic::{fence, Ordering}};
+use std::{os::fd::{RawFd, FromRawFd}, convert::TryInto, mem::size_of, sync::atomic::{fence, Ordering}};
 
 use crate::{amd64_def::{SegmentDescriptor, SEGMENT_DESCRIPTOR_ACCESS, SEGMENT_DESCRIPTOR_EXECUTE,
             SEGMENT_DESCRIPTOR_PRESENT, SEGMENT_DESCRIPTOR_WRITE}, arch::{tee::{emulcc::EmulCc,
@@ -30,6 +30,9 @@ use crate::{amd64_def::{SegmentDescriptor, SEGMENT_DESCRIPTOR_ACCESS, SEGMENT_DE
 use crate::{SHARE_SPACE, KERNEL_IO_THREAD, syncmgr::SyncMgr};
 use crate::runc::runtime::vm;
 use crate::arch::ConfCompExtension;
+use crate::qlib::kernel::arch::tee::gpa_adjust_shared_bit;
+#[cfg(feature = "snp")]
+use crate::arch::tee::sevsnp::SevSnp;
 use crate::GLOCK;
 use qlib::{linux_def::MemoryDef, common::Error, qmsg::qcall::{Print, QMsg},
     GetTimeCall, linux::time::Timespec, VcpuFeq,
@@ -86,6 +89,11 @@ impl VirtCpu for X86_64VirtCpu {
             CCMode::Normal | CCMode::NormalEmu =>
                 EmulCc::initialize_conf_extension(share_space_table_addr,
                 page_allocator_base_addr)?,
+            #[cfg(feature = "snp")]
+            CCMode::SevSnp => 
+                SevSnp::initialize_conf_extension(share_space_table_addr,
+                page_allocator_base_addr)?,
+            #[allow(unreachable_patterns)]
             _ => {
                 return Err(Error::InvalidArgument("Create vcpu failed - bad CCMode type"
                     .to_string()));
@@ -155,8 +163,15 @@ impl VirtCpu for X86_64VirtCpu {
         let tid = unsafe { gettid() };
         self.vcpu_base.threadid.store(tid as u64, Ordering::SeqCst);
         self.vcpu_base.tgid.store(tgid as u64, Ordering::SeqCst);
-
-        self._run(None)
+        match get_tee_type() {
+            CCMode::SevSnp => {
+                let kvm = unsafe{ Kvm::from_raw_fd(_kvm_fd.unwrap())};
+                let vmfd = unsafe { kvm.create_vmfd_from_rawfd(_vm_fd.unwrap()).unwrap()};
+                let vm_fd_option = Some(&vmfd);
+                return self._run(vm_fd_option);
+            }
+            _ => return self._run(None),
+        }        
     }
 
     fn default_hypercall_handler(&self, hypercall: u16, arg0: u64, arg1: u64,
@@ -411,7 +426,9 @@ impl X86_64VirtCpu {
             .map_err(|e| Error::IOError(format!("Get sregs failed - error:{:?}", e)))?;
 
         vcpu_sregs.cr0 = CR0_PE | CR0_AM | CR0_ET | CR0_PG | CR0_NE;
-        vcpu_sregs.cr3 = VMS.lock().pageTables.GetRoot();
+        let mut cr3_value = VMS.lock().pageTables.GetRoot();
+        gpa_adjust_shared_bit(&mut cr3_value, true);
+        vcpu_sregs.cr3 = cr3_value;
         vcpu_sregs.cr4 = CR4_PSE | CR4_PAE | CR4_PGE | CR4_OSFXSR
             | CR4_OSXMMEXCPT | CR4_FSGSBASE | CR4_OSXSAVE;
 

@@ -11,7 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
+#[cfg(feature = "snp")]
+pub mod sevsnp;
 pub mod emulcc;
 
 use kvm_ioctls::{VcpuExit, VcpuFd};
@@ -72,11 +73,10 @@ pub mod util {
     #[inline]
     pub fn get_offset(confidentiality_type: CCMode) -> u64 {
         let offset = match confidentiality_type {
-            CCMode::None | CCMode::Normal =>
+            CCMode::None | CCMode::Normal | CCMode::SevSnp =>
                 0,
             CCMode::NormalEmu =>
                 MemoryDef::UNIDENTICAL_MAPPING_OFFSET,
-            _ => panic!(""),
         };
         offset
     }

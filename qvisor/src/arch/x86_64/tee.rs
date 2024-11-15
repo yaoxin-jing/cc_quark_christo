@@ -16,6 +16,8 @@ use kvm_ioctls:: VcpuFd;
 use crate::arch::tee::emulcc::EmulCc;
 use crate::arch::tee::NonConf;
 use crate::qlib::common::Error;
+#[cfg(feature = "snp")]
+use crate::arch::tee::sevsnp::SevSnp;
 
 impl NonConf<'_> {
     pub(in crate::arch) fn _set_cpu_registers(&self, vcpu_fd: &VcpuFd) -> Result<(), Error> {
@@ -49,6 +51,20 @@ impl EmulCc<'_> {
         cpu_regs.rdi = self.page_allocator_addr;
         //arg1
         cpu_regs.rsi = self.cc_mode as u64;
+        vcpu_fd.set_regs(&cpu_regs)
+            .expect("vCPU - failed to set up cpu registers.");
+        Ok(())
+    }
+}
+
+#[cfg(feature = "snp")]
+impl SevSnp<'_> {
+    pub(in crate::arch) fn _set_cpu_registers(&self, vcpu_fd: &kvm_ioctls::VcpuFd) -> Result<(), Error> {
+        let mut cpu_regs = vcpu_fd.get_regs().unwrap();
+        //arg0
+        cpu_regs.rdi = self.page_allocator_addr;
+        //arg1
+        cpu_regs.rsi = crate::CCMode::SevSnp as u64;
         vcpu_fd.set_regs(&cpu_regs)
             .expect("vCPU - failed to set up cpu registers.");
         Ok(())
