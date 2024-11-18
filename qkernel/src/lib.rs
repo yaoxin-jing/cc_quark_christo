@@ -65,6 +65,13 @@ extern crate kbs_types;
 extern crate getrandom;
 extern crate zeroize;
 extern crate sha2;
+//
+// Sev/Snp
+//
+#[cfg(feature = "snp")]
+extern crate yaxpeax_arch;
+#[cfg(feature = "snp")]
+extern crate yaxpeax_x86;
 
 use core::panic::PanicInfo;
 use core::sync::atomic::{AtomicI32, AtomicUsize, Ordering};

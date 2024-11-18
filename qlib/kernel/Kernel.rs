@@ -29,6 +29,8 @@ use crate::GLOBAL_ALLOCATOR;
 use crate::GUEST_HOST_SHARED_ALLOCATOR;
 
 pub static IDENTICAL_MAPPING: AtomicBool = AtomicBool::new(true);
+#[cfg(feature = "snp")]
+pub static LOG_AVAILABLE: AtomicBool = AtomicBool::new(true);
 
 extern "C" {
     pub fn rdtsc() -> i64;
@@ -1366,6 +1368,10 @@ impl HostSpace {
     }
 
     pub fn Panic(str: &str) {
+        #[cfg(feature = "snp")]
+        if !LOG_AVAILABLE.load(Ordering::Acquire){
+            return;
+        }
         if is_cc_active() {
             //copy the &str to shared buffer
             let bytes = str.as_bytes();
@@ -2117,6 +2123,10 @@ impl HostSpace {
     }
 
     pub fn SyncPrint(level: DebugLevel, str: &str) {
+        #[cfg(feature = "snp")]
+        if !LOG_AVAILABLE.load(Ordering::Acquire){
+            return;
+        }
         if is_cc_active() {
             let shared_str = SharedCString::New(str);
             let msg = Box::new_in(
