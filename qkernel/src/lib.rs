@@ -133,10 +133,14 @@ use self::quring::*;
 use self::syscalls::syscalls::*;
 use self::task::*;
 use self::threadmgr::task_sched::*;
+#[cfg(feature = "snp")]
+use crate::qlib::kernel::Kernel::LOG_AVAILABLE;
 
 use self::qlib::mem::cc_allocator::*;
 use alloc::boxed::Box;
 use memmgr::pma::PageMgr;
+#[cfg(feature = "snp")]
+use crate::qlib::kernel::arch::__arch::arch_def::*;
 
 #[macro_use]
 mod print;
@@ -153,6 +157,8 @@ pub mod attestation_agent;
 
 #[cfg(feature = "snp")]
 use crate::qlib::kernel::arch::tee::sev_snp::ghcb::*;
+#[cfg(feature = "snp")]
+use crate::qlib::kernel::arch::tee::sev_snp::{set_cbit_mask, pvalidate, PvalidateSize};
 
 #[global_allocator]
 pub static VCPU_ALLOCATOR: GlobalVcpuAllocator = GlobalVcpuAllocator::New();
@@ -186,7 +192,6 @@ pub fn SingletonInit() {
         vcpu::VCPU_COUNT.Init(AtomicUsize::new(0));
         vcpu::CPU_LOCAL.Init(&SHARESPACE.scheduler.VcpuArr);
         set_cpu_local(0);
-        KERNEL_PAGETABLE.Init(PageTables::Init(CurrentUserTable()));
         //init fp state with current fp state as it is brand new vcpu
         FP_STATE.Reset();
 
@@ -194,10 +199,16 @@ pub fn SingletonInit() {
         //error!("error message");
 
         if is_cc_active(){
-            PAGE_MGR.SetValue(PAGE_MGR_HOLDER.Addr());
+            if crate::qlib::kernel::arch::tee::get_tee_type() != CCMode::SevSnp {
+                KERNEL_PAGETABLE.Init(PageTables::Init(CurrentUserTable()));
+                interrupt::InitSingleton();
+                PAGE_MGR.SetValue(PAGE_MGR_HOLDER.Addr());
+            }
         } else {
+            KERNEL_PAGETABLE.Init(PageTables::Init(CurrentUserTable()));
             SHARESPACE.SetSignalHandlerAddr(SignalHandler as u64);
             PAGE_MGR.SetValue(SHARESPACE.GetPageMgrAddr());
+            interrupt::InitSingleton();
         }
         IOURING.SetValue(SHARESPACE.GetIOUringAddr());
         LOADER.Init(Loader::default());
@@ -221,7 +232,6 @@ pub fn SingletonInit() {
 
         fs::file::InitSingleton();
         fs::filesystems::InitSingleton();
-        interrupt::InitSingleton();
         kernel::futex::InitSingleton();
         kernel::semaphore::InitSingleton();
         kernel::epoll::epoll::InitSingleton();
@@ -649,6 +659,33 @@ pub extern "C" fn rust_main(
         GLOBAL_ALLOCATOR.InitPrivateAllocator(mode);
         if mode != CCMode::None {
             crate::qlib::kernel::arch::tee::set_tee_type(mode);
+            #[cfg(feature = "snp")]
+            if mode == CCMode::SevSnp {
+                LOG_AVAILABLE.store(false, Ordering::Release);
+                for i in (MemoryDef::PHY_LOWER_ADDR..MemoryDef::IO_HEAP_END)
+                        .step_by(MemoryDef::PAGE_SIZE as usize)
+                    {
+                        let _ret = pvalidate(VirtAddr::new(i), PvalidateSize::Size4K, true);
+                    }
+                    unsafe {
+                        KERNEL_PAGETABLE
+                            .Init(PageTables::Init(CurrentKernelTable() & 0xffff_ffff_ffff));
+                    }
+
+                    //set idt first here cpuid is interceptted in cc
+                    unsafe {
+                        interrupt::InitSingleton();
+                    }
+                    interrupt::init();
+                    set_cbit_mask();
+                    PAGE_MGR.SetValue(PAGE_MGR_HOLDER.Addr());
+                    // ghcb convert shared memory
+                    InitShareMemory();
+                    //Different from normal vm, mxcsr will not be set by kvm, should set it mannualy
+                    //Should set before SingletonInit where default FP_STATE is saved.
+                    let mxcsr_value = MXCSR_DEFAULT;
+                    ldmxcsr(&mxcsr_value as *const _ as u64);
+            }
             GLOBAL_ALLOCATOR.InitSharedAllocator(mode);
             let size = core::mem::size_of::<ShareSpace>();
             let shared_space = unsafe {
@@ -662,6 +699,8 @@ pub extern "C" fn rust_main(
         }
 
         SingletonInit();
+        #[cfg(feature = "snp")]
+        LOG_AVAILABLE.store(true, Ordering::Release);
         debug!("init singleton finished");
         SetVCPCount(vcpuCnt as usize);
 
@@ -689,8 +728,17 @@ pub extern "C" fn rust_main(
         // release other vcpus
         HyperCall64(qlib::HYPERCALL_RELEASE_VCPU, 0, 0, 0, 0);
     } else {
+        #[cfg(feature = "snp")]
+        x86_64::instructions::tlb::flush_all();
+        interrupt::init();
         set_cpu_local(id);
-        //PerfGoto(PerfType::Kernel);
+        #[cfg(feature = "snp")]
+        if crate::qlib::kernel::arch::tee::get_tee_type() == CCMode::SevSnp {
+            //Different from normal vm, mxcsr will not be set by kvm, should set it mannualy
+            let mxcsr_value = MXCSR_DEFAULT;
+            ldmxcsr(&mxcsr_value as *const _ as u64);
+            InitGhcb(id as usize);
+        }
     }
 
     SHARESPACE.IncrVcpuSearching();
