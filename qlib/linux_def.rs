@@ -3100,6 +3100,13 @@ impl MemoryDef {
     pub const GUEST_PRIVATE_RUNNING_HEAP_END: u64 = Self::GUEST_PRIVATE_HEAP_END;
 }
 
+#[cfg(feature = "snp")]
+impl MemoryDef {
+    pub const CPUID_PAGE: u64 = Self::PHY_LOWER_ADDR + Self::QKERNEL_IMAGE_SIZE;
+    pub const SECRET_PAGE: u64 = Self::CPUID_PAGE + Self::PAGE_SIZE;
+    pub const GHCB_OFFSET: u64 = Self::SECRET_PAGE + Self::PAGE_SIZE;
+}
+
 //mmap prot
 pub struct MmapProt {}
 
