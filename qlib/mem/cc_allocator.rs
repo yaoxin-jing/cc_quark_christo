@@ -1,8 +1,10 @@
 use crate::kernel_def::VcpuId;
+use crate::qlib::kernel::arch::tee::get_tee_type;
 use crate::qlib::kernel::vcpu::VCPU_COUNT;
 use crate::qlib::linux_def::*;
 use crate::qlib::mem::list_allocator::*;
 use crate::qlib::Vec;
+use crate::CCMode;
 use crate::GLOBAL_ALLOCATOR;
 use core::alloc::{AllocError, Allocator, GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
@@ -88,7 +90,9 @@ impl HostAllocator {
 
     pub fn IsGuestPrivateHeapAddr(&self, addr: u64) -> bool {
         let heapStart = self.guestPrivHeapAddr.load(Ordering::Relaxed);
-        let heapSize = if crate::qlib::kernel::Kernel::IDENTICAL_MAPPING.load(Ordering::Acquire) {
+        let heapSize = if crate::qlib::kernel::Kernel::IDENTICAL_MAPPING.load(Ordering::Acquire)
+            && get_tee_type() != CCMode::SevSnp
+        {
             MemoryDef::GUEST_PRIVATE_HEAP_SIZE
         } else {
             MemoryDef::GUEST_PRIVATE_RUNNING_HEAP_SIZE
