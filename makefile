@@ -28,6 +28,8 @@ all:: release debug
 
 cuda_all:: cuda_release cuda_debug
 
+snp_all:: snp_release snp_debug
+
 release:: qvisor_release qkernel_release $(VDSO)
 
 debug:: qvisor_debug qkernel_debug $(VDSO)
@@ -69,6 +71,22 @@ qvisor_cuda_release:
 
 qvisor_cuda_debug:
 	make -C ./qvisor TOOLCHAIN=$(RUST_TOOLCHAIN) cuda_debug
+
+snp_release:: qvisor_snp_release qkernel_snp_release $(VDSO)
+
+snp_debug:: qvisor_snp_debug qkernel_snp_debug $(VDSO)
+
+qkernel_snp_release:
+	make -C ./qkernel TOOLCHAIN=$(RUST_TOOLCHAIN) snp_release
+
+qkernel_snp_debug:
+	make -C ./qkernel TOOLCHAIN=$(RUST_TOOLCHAIN) snp_debug
+
+qvisor_snp_release:
+	make -C ./qvisor TOOLCHAIN=$(RUST_TOOLCHAIN) snp_release
+
+qvisor_snp_debug:
+	make -C ./qvisor TOOLCHAIN=$(RUST_TOOLCHAIN) snp_debug
 
 install:
 	-sudo cp -f $(QKERNEL_RELEASE) $(QBIN_DIR)/
