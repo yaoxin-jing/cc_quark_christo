@@ -153,3 +153,103 @@ pub mod rsi {
         }
     }
 }
+
+pub mod attestation {
+    use crate::qlib::{common::{Result, Error}, linux_def::SysErr};
+    use alloc::vec::Vec;
+    use core::convert::TryInto;
+
+    const RSI_ATTESTATION_TOKEN_INIT_FID: u64 = 0xC4000194;
+    const RSI_ATTESTATION_TOKEN_CONTINUE_FID: u64 = 0xC4000195;
+    const RSI_SUCCESS: u64 = 0;
+    const RSI_INCOMPLETE: u64 = 3;
+    const REQ_PACKET_SIZE: usize = 9;
+
+    pub fn init_attestation(challenge: &Vec<u8>) -> Result<usize> {
+        #![allow(unused_mut)]
+
+        let mut gprs: [u64; REQ_PACKET_SIZE] = [0u64; REQ_PACKET_SIZE];
+        gprs[0] = RSI_ATTESTATION_TOKEN_INIT_FID;
+        debug!("VM: Copy challenge to request packet");
+        for i in 1..9 {
+            gprs[i] = u64::from_le_bytes(challenge[((i-1)*8)..(((i-1)*8)+8)]
+                .try_into().unwrap());
+        }
+        debug!("VM: Attestation - request:{:?}", gprs);
+
+        let (res, size) = _scm_att_req(gprs[0], gprs[1], gprs[2], gprs[3],
+            gprs[4], gprs[5], gprs[6], gprs[7], gprs[8]);
+
+        if res != RSI_SUCCESS {
+            debug!("VM: Attestation init failed with:{}", res);
+            return Err(Error::SystemErr(SysErr::EINVAL));
+        }
+
+        Ok(size as usize)
+
+    }
+
+    #[inline(never)]
+    fn _scm_att_req(_fid: u64, _x1: u64, _x2: u64, _x3: u64, _x4: u64,
+        _x5: u64, _x6: u64, _x7: u64, _x8: u64) -> (u64, u64) {
+        use core::arch::asm;
+        let mut res: u64 = _fid;
+        let mut size: u64 = _x1;
+        unsafe {
+            asm!(" sub sp, sp, #16
+                stp x8, xzr, [sp]
+                ldr x8, [sp, #8*4]
+                bl _smc_exit
+                ldp x8, xzr, [sp]
+                add sp, sp, #16",
+                inout("x0") res,
+                inout("x1") size,
+                in("x2") _x2, in("x3") _x3,
+                in("x4") _x4, in("x5") _x5,
+                in("x6") _x6, in("x7") _x7,
+                clobber_abi("C"));
+        }
+        debug!("VM: Attestation - res:{}, size{}", res, size);
+        (res, size)
+    }
+
+    pub fn attestation_cont(token: &mut Vec<u8>, buff_addr: u64)
+        -> Result<bool> {
+        let mut req_parts: [u64; REQ_PACKET_SIZE] =
+            [0u64; REQ_PACKET_SIZE]; // FID | addr | offset | size | ...pad...
+        req_parts[0] = RSI_ATTESTATION_TOKEN_CONTINUE_FID as u64;
+        req_parts[1] = buff_addr;
+        req_parts[3] = crate::qlib::linux_def::MemoryDef::PAGE_SIZE;
+        let mut res_parts: [u64; 2] = [RSI_INCOMPLETE, 0u64]; // result | len
+        let token_capacity: u64 = token.capacity().try_into().unwrap();
+
+        while res_parts[0] == RSI_INCOMPLETE {
+            req_parts[2] = 0;
+            while res_parts[0] == RSI_INCOMPLETE && req_parts[2] < req_parts[3] {
+                (res_parts[0], res_parts[1]) = _scm_att_req(req_parts[0], req_parts[1],
+                    req_parts[2], req_parts[3], req_parts[4], req_parts[5],
+                    req_parts[6], req_parts[7], req_parts[8]);
+                if res_parts[0] != RSI_SUCCESS && res_parts[0] != RSI_INCOMPLETE {
+                    error!("VM: SCM attestation request failed: {}, len: {}",
+                        res_parts[0], res_parts[1]);
+                    return Err(Error::SystemErr(SysErr::EINVAL));
+                }
+                req_parts[2] += res_parts[1];
+            };
+            if token.len() as u64 + req_parts[2] > token_capacity {
+                error!("VM: attestation token written beyond capacity - written:{}, new extend:{}",
+                token.len(), req_parts[2]);
+                return Err(Error::SystemErr(SysErr::EINVAL));
+            }
+            let buf = unsafe {
+                core::slice::from_raw_parts(buff_addr as *const u8, req_parts[2] as usize)
+            };
+            token.extend_from_slice(buf);
+        };
+        if token.len() == 0 {
+            return Ok(false);
+        }
+
+        Ok(true)
+    }
+}
