@@ -23,6 +23,11 @@ use crate::qlib::{common::{Result, Error},
 pub type Challenge = Vec<u8>;
 pub type Response = String;
 
+#[cfg(target_arch = "aarch64")]
+#[path = "./arm-cca/attestation.rs"]
+pub mod hw_attestation;
+
+#[cfg(not(target_arch = "aarch64"))]
 pub(self) mod hw_attestation {
     #[derive(Default)]
     pub struct Dummy;
