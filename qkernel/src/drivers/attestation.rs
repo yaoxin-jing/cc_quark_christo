@@ -17,13 +17,19 @@ use lazy_static::lazy_static;
 use core::cell::SyncUnsafeCell;
 use spin::{Mutex, lazy::Lazy};
 
-use self::hw_attestation::TeeAttester;
 use crate::qlib::{common::{Result, Error},
     linux_def::SysErr};
 
 pub type Challenge = Vec<u8>;
 pub type Response = String;
 
+#[cfg(target_arch = "aarch64")]
+#[path = "./arm-cca/attestation.rs"]
+pub mod hw_attestation;
+#[cfg(target_arch = "aarch64")]
+use self::hw_attestation::TeeAttester;
+
+#[cfg(not(target_arch = "aarch64"))]
 pub(self) mod hw_attestation {
     #[derive(Default)]
     pub struct Dummy;
