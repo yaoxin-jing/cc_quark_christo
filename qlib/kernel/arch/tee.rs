@@ -25,6 +25,8 @@ use core::sync::atomic::{AtomicU8, Ordering};
 use lazy_static::lazy_static;
 use crate::qlib::linux_def::MemoryDef;
 use crate::qlib::config::CCMode;
+use crate::qlib::common::Result;
+use alloc::vec::Vec;
 
 lazy_static! {
     //TODO: It should be only set once
@@ -118,4 +120,19 @@ pub fn call_host(_hcall_type: u64, _arg1: u64, _arg2: u64, _arg3: u64, _arg4: u6
 pub fn boot_others(_boot_help_data: u64, _vcpu_count: u64, _pc: u64) {
     #[cfg(target_arch = "aarch64")]
     _tee::psci::cpu_on(_boot_help_data as *const u64, _vcpu_count, _pc);
+}
+
+pub fn get_attestation(_challenge: &Vec<u8>) -> Result<usize> {
+    #[cfg(target_arch = "aarch64")] {
+        return _tee::attestation::init_attestation(_challenge);
+    }
+    #[cfg(not(target_arch = "aarch64"))] {
+        todo!();
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn get_attestation_continue(_token: &mut Vec<u8>, _buff_addr: u64)
+    -> Result<bool> {
+    _tee::attestation::attestation_cont(_token, _buff_addr)
 }
