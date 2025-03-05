@@ -169,7 +169,8 @@ lazy_static! {
     pub static ref GUEST_KERNEL: Mutex<Option<Kernel>> = Mutex::new(None);
 }
 
-pub const LOG_FILE: &'static str = "/var/log/quark/quark.log";
+//pub const LOG_FILE: &'static str = "/var/log/quark/quark.log";
+pub const LOG_FILE: &'static str = "/home/realm/Quark/log/quark.log";
 
 pub fn InitSingleton() {
     self::qlib::InitSingleton();
