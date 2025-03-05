@@ -308,7 +308,7 @@ pub fn HyperCall64(type_: u16, para1: u64, para2: u64, para3: u64, para4: u64) {
         //
         //TODO: We can remove the call_host when MMIO is tested to work
         //
-        if is_hw_tee() == false {
+ //       if is_hw_tee() == false {
             let dummy_data: u8 = 0;
             unsafe {
                 asm!("str w1, [x0]",
@@ -316,10 +316,10 @@ pub fn HyperCall64(type_: u16, para1: u64, para2: u64, para3: u64, para4: u64) {
                     in("w1") dummy_data,
                 )
             }
-        } else {
-            use crate::qlib::kernel::arch::tee::call_host;
-            call_host(hcall_id, para1, para2, para3, para4);
-        }
+//        } else {
+//            use crate::qlib::kernel::arch::tee::call_host;
+//            call_host(hcall_id, para1, para2, para3, para4);
+//        }
     }
 }
 
@@ -484,6 +484,9 @@ impl HostAllocator {
         match mode {
             CCMode::NormalEmu | CCMode::Cca => {
                 crate::qlib::kernel::Kernel::IDENTICAL_MAPPING.store(false, Ordering::SeqCst);
+    #[cfg(target_arch = "aarch64")]
+    crate::qlib::kernel::arch::tee::call_host(crate::qlib::linux_def::MemoryDef::HYPERCALL_MMIO_BASE + 21u64,
+        0xf, 0xa, 0xa,0xf);
                 self.guestPrivHeapAddr.store(
                     MemoryDef::GUEST_PRIVATE_RUNNING_HEAP_OFFSET,
                     Ordering::SeqCst,
@@ -493,6 +496,9 @@ impl HostAllocator {
                     MemoryDef::GUEST_PRIVATE_RUNNING_HEAP_OFFSET
                         + MemoryDef::GUEST_PRIVATE_RUNNING_HEAP_SIZE,
                 );
+    #[cfg(target_arch = "aarch64")]
+    crate::qlib::kernel::arch::tee::call_host(crate::qlib::linux_def::MemoryDef::HYPERCALL_MMIO_BASE + 21u64,
+        0xa, 0xa, 0xa,0xa);
                 let size = core::mem::size_of::<ListAllocator>();
                 self.GuestPrivateAllocator().Add(
                     MemoryDef::GUEST_PRIVATE_RUNNING_HEAP_OFFSET as usize + size,
@@ -520,18 +526,29 @@ impl HostAllocator {
                     .store(MemoryDef::GUEST_HOST_SHARED_HEAP_OFFSET, Ordering::SeqCst);
                 let sharedHeapStart = self.sharedHeapAddr.load(Ordering::Relaxed);
                 let sharedHeapEnd = sharedHeapStart + MemoryDef::GUEST_HOST_SHARED_HEAP_SIZE as u64;
+    #[cfg(target_arch = "aarch64")]
+    crate::qlib::kernel::arch::tee::call_host(crate::qlib::linux_def::MemoryDef::HYPERCALL_MMIO_BASE + 21u64,
+        0xb, 0xa, sharedHeapStart,sharedHeapEnd);
                 *self.GuestHostSharedAllocator() =
                     ListAllocator::New(sharedHeapStart as _, sharedHeapEnd);
                 let ioHeapEnd = sharedHeapEnd + MemoryDef::IO_HEAP_SIZE;
+    #[cfg(target_arch = "aarch64")]
+    crate::qlib::kernel::arch::tee::call_host(crate::qlib::linux_def::MemoryDef::HYPERCALL_MMIO_BASE + 21u64,
+        0xb, 0xc, sharedHeapEnd,ioHeapEnd);
+                //self.ioHeapAddr.store(sharedHeapEnd, Ordering::SeqCst);
+                //*self.IOAllocator() = ListAllocator::New(sharedHeapEnd as _, ioHeapEnd);
 
-                self.ioHeapAddr.store(sharedHeapEnd, Ordering::SeqCst);
-                *self.IOAllocator() = ListAllocator::New(sharedHeapEnd as _, ioHeapEnd);
-
-                let size = core::mem::size_of::<ListAllocator>();
-                self.IOAllocator().Add(
-                    MemoryDef::HEAP_END as usize + size,
-                    MemoryDef::IO_HEAP_SIZE as usize - size,
-                );
+    #[cfg(target_arch = "aarch64")]
+    crate::qlib::kernel::arch::tee::call_host(crate::qlib::linux_def::MemoryDef::HYPERCALL_MMIO_BASE + 21u64,
+        0xb, 0xc, 0xc,0xa);
+                // 
+                // NOTE: Think about the unidentical mapping effect
+                //
+                //let size = core::mem::size_of::<ListAllocator>();
+               // self.IOAllocator().Add(
+               //     MemoryDef::HEAP_END as usize + size,
+               //     MemoryDef::IO_HEAP_SIZE as usize - size,
+               // );
                 // reserve 4 pages for the listAllocator and share para page
                 let size = 4 * MemoryDef::PAGE_SIZE as usize;
                 self.GuestHostSharedAllocator().Add(
