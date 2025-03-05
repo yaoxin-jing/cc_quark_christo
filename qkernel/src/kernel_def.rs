@@ -20,8 +20,6 @@ use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 
 use crate::qlib::fileinfo::*;
-#[cfg(target_arch = "aarch64")]
-use crate::qlib::kernel::arch::tee::is_hw_tee;
 
 use self::kernel::socket::hostinet::tsot_mgr::TsotSocketMgr;
 use self::tsot_msg::TsotMessage;
@@ -278,17 +276,17 @@ pub fn HyperCall64(type_: u16, para1: u64, para2: u64, para3: u64, para4: u64) {
 
 #[cfg(target_arch = "aarch64")]
 #[inline(always)]
-pub fn HyperCall64(type_: u16, para1: u64, para2: u64, para3: u64, para4: u64) {
+pub fn HyperCall64(r#type: u16, para1: u64, para2: u64, para3: u64, para4: u64) {
     // Use MMIO to cause VM exit hence "hypercall". The data does not matter,
     // addr of the MMIO identifies the Hypercall. x0 and x1 (w1) are used by the
     // str instruction, the 4x 64-bit parameters are passed via x2,x3,x4,x5.
+    let dummy_data: u8 = 0;
+    let hcall_id = MemoryDef::HYPERCALL_MMIO_BASE as u64 + r#type as u64;
     if crate::qlib::kernel::arch::tee::is_cc_active() == false {
-        let data: u8 = 0;
-        let addr: u64 = MemoryDef::HYPERCALL_MMIO_BASE + (type_ as u64);
         unsafe {
             asm!("str w1, [x0]",
-                in("x0") addr,
-                in("w1") data,
+                in("x0") hcall_id,
+                in("w1") dummy_data,
                 in("x2") para1,
                 in("x3") para2,
                 in("x4") para3,
@@ -297,29 +295,24 @@ pub fn HyperCall64(type_: u16, para1: u64, para2: u64, para3: u64, para4: u64) {
         }
     } else {
         // We can not query which is the current vCpu before the share space is initialized.
-        let vcpu_id = if type_ != crate::qlib::HYPERCALL_SHARESPACE_INIT {
+        let vcpu_id = if r#type!= crate::qlib::HYPERCALL_SHARESPACE_INIT {
             GetVcpuId()
         } else {
             0
         };
         _hcall_prepare_shared_buff(vcpu_id, para1, para2, para3, para4);
-
-        let hcall_id = MemoryDef::HYPERCALL_MMIO_BASE as u64 + type_ as u64;
-        //
-        //TODO: We can remove the call_host when MMIO is tested to work
-        //
-        if is_hw_tee() == false {
-            let dummy_data: u8 = 0;
-            unsafe {
-                asm!("str w1, [x0]",
-                    in("x0") hcall_id,
-                    in("w1") dummy_data,
-                )
-            }
-        } else {
-            use crate::qlib::kernel::arch::tee::call_host;
-            call_host(hcall_id, para1, para2, para3, para4);
+//
+//      For CCA: Alternative, use host_call()
+//            use crate::qlib::kernel::arch::tee::call_host;
+//            call_host(hcall_id, para1, para2, para3, para4);
+//
+        unsafe {
+            asm!("str w1, [x0]",
+                in("x0") hcall_id,
+                in("w1") dummy_data,
+            )
         }
+
     }
 }
 
@@ -523,7 +516,6 @@ impl HostAllocator {
                 *self.GuestHostSharedAllocator() =
                     ListAllocator::New(sharedHeapStart as _, sharedHeapEnd);
                 let ioHeapEnd = sharedHeapEnd + MemoryDef::IO_HEAP_SIZE;
-
                 self.ioHeapAddr.store(sharedHeapEnd, Ordering::SeqCst);
                 *self.IOAllocator() = ListAllocator::New(sharedHeapEnd as _, ioHeapEnd);
 
