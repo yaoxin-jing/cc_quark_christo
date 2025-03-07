@@ -140,6 +140,7 @@ pub mod kernel_def;
 pub mod rdma_def;
 mod syscalls;
 pub mod drivers;
+pub mod attestation_agent;
 
 #[global_allocator]
 pub static VCPU_ALLOCATOR: GlobalVcpuAllocator = GlobalVcpuAllocator::New();
@@ -736,6 +737,13 @@ pub extern "C" fn rust_main(
     }
 
     WaitFn();
+}
+
+//Dummy: Only to avoid issues with qvisor
+use alloc::string::String;
+use alloc::vec::Vec;
+pub fn try_attest(config_path: Option<String>, envv: Option<Vec<String>>) {
+    crate::attestation_agent::AttestationAgent::try_attest(config_path, envv);
 }
 
 fn StartExecProcess(fd: i32, process: Process) -> ! {
