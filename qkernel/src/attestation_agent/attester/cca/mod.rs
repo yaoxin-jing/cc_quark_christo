@@ -12,26 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use alloc::{boxed::Box, vec::Vec};
-
-use crate::drivers::tee::attestation::{Challenge, Response};
+use alloc::vec::Vec;
 use crate::qlib::common::Result;
+use crate::drivers::tee::attestation::{Challenge, Response, ATTESTATION_DRIVER};
 
-use super::InitDataStatus;
+use super::AttesterT;
 
-#[cfg(target_arch = "aarch64")]
-pub mod cca;
+#[derive(Default)]
+pub struct CcaAttester();
 
-pub trait AttesterT {
-    fn get_tee_evidence(&self, challenge: &mut Challenge) -> Result<Response>;
+#[derive(Default, Serialize, Deserialize)]
+struct CcaEvidence {
+    token: Vec<u8>,
+}
 
-    fn check_init_data(&self, _init_data: Vec<u8>) -> Result<InitDataStatus> {
-        Ok(InitDataStatus::Unsupported)
-    }
-
-    fn extend_runtime_measurement(&self) -> Result<bool> {
-        Ok(false)
+impl  AttesterT for CcaAttester {
+    fn get_tee_evidence(&self, challenge: &mut Challenge) -> Result<Response> {
+        let token = ATTESTATION_DRIVER.lock().get_report(challenge)
+            .expect("CCA report token");
+        let evidence = CcaEvidence {
+            token
+        };
+        let response = serde_json::to_string(&evidence)
+            .expect("evidence as string");
+        Ok(response)
     }
 }
 
-pub type Attester = Box<dyn AttesterT>;
