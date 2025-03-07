@@ -219,3 +219,5 @@ fn main() {
         }
     }
 }
+
+pub fn try_attest(_config_path: Option<String>, _envv: Option<Vec<String>>) {  }
