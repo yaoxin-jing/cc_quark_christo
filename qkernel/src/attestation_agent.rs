@@ -87,7 +87,6 @@ impl AttestationAgent {
         let mut conn_client = ConnectionClient {
             http_client: httpc,
             tls_conn: tls,
-            tee_key: None,
             cookie: "".to_string()
         };
         let token = aa.get_attestation_token(&mut conn_client)

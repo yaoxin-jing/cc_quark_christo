@@ -17,6 +17,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use sha2::Sha384;
 
+use crate::attestation_agent::kbc::{KBC_ENC_ALG, KBC_KEY_LENGTH};
 use crate::attestation_agent::util::connection::{tls_connection, ConnError, ConnectionClient, HttpReq, Connector, KbsResponce, RespType};
 use crate::attestation_agent::util::keys::{TeeKeyPair, TeePubKey};
 //use crate::attestation_agent::util::Resource;
@@ -99,7 +100,7 @@ impl KbsClientT for KbsClient<BackgroundCkeck> {
         let kbs_resp: KbsResponce = kbs_resp_res.unwrap();
         let resource: kbs_types::Response = kbs_resp.resource.unwrap();
         let plaintext: Result<Vec<u8>> =
-            self.decrypt_resource(resource, http_client.tee_key.clone());
+            self.decrypt_resource(resource, self.tee_key.clone());
         if plaintext.is_err() {
             error!("AA - Decrypting resource failed");
             return Err(Error::Common("Failed decrypt-op".to_string()));
@@ -192,6 +193,9 @@ impl<BackgroundCkeck> KbsClient<BackgroundCkeck> {
         aa: &AttestationAgent) -> Result<(Token, TeeKeyPair)> {
         debug!("VM: Do RCAR handshake");
         let mut http_client = _http_client.http_client.clone();
+        let tee_kp = TeeKeyPair::new(KBC_KEY_LENGTH, KBC_ENC_ALG.to_string())
+                .expect("VM: AA - Failed to create TeeKeyPair");
+        let pub_tkey: TeePubKey = tee_kp.export_tee_pub_key();
         let mut req_type = HttpReq::Post(self.request_challenge());
         let challenge_request = Connector::build_request(tee, self.kbs_version.clone(),
             "".to_string(), &req_type);
@@ -215,8 +219,9 @@ impl<BackgroundCkeck> KbsClient<BackgroundCkeck> {
         _http_client.cookie = responce.cookie.clone().unwrap();
         debug!("VM: RCAR - cookie:{:?}", _http_client.cookie);
 
-        let pub_tkey: TeePubKey = http_client.tee_key.clone().unwrap()
-            .export_tee_pub_key();
+       // let pub_tkey: TeePubKey = _http_client.tee_key.clone().unwrap()
+       //     .export_tee_pub_key();
+
         let hushed_data = self.hash_data(pub_tkey.clone(), responce)
             .expect("AA - hash response failed");
         let hw_meas = aa.get_tee_evidence(hushed_data.clone()).unwrap();
@@ -279,7 +284,7 @@ impl<BackgroundCkeck> KbsClient<BackgroundCkeck> {
       //      debug!("VM: AA - Plaintext:{:?}", text);
       //  }
         //////////////////////////////////////////////
-        Ok((token, http_client.tee_key.clone().unwrap()))
+        Ok((token, tee_kp))
     }
 
     fn hash_data(&self, pub_tkey: TeePubKey, to_hash_data: KbsResponce) -> Result<Vec<u8>> {
