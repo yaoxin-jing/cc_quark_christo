@@ -319,7 +319,6 @@ pub(super) mod connection {
         pub read_buf_len: usize,
         pub retry_read_times: usize,
         pub tee_key: Option<TeeKeyPair>,
-        pub cookie: String,
         _addr: Option<Vec<u8, GuestHostSharedAllocator>>
     }
 
@@ -389,7 +388,6 @@ pub(super) mod connection {
 
             Self {
                 socket_file: socket,
-                cookie: String::default(),
                 read_buf: Vec::new(),
                 tee_key: Some(tk),
                 //Arbitratry valuees

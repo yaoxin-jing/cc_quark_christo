@@ -213,15 +213,14 @@ impl<BackgroundCkeck> KbsClient<BackgroundCkeck> {
         }
         let responce: KbsResponce = responce_res.unwrap();
         _http_client.cookie = responce.cookie.clone().unwrap();
-        http_client.cookie = _http_client.cookie.clone();
-        debug!("VM: RCAR - cookie:{:?}", http_client.cookie);
+        debug!("VM: RCAR - cookie:{:?}", _http_client.cookie);
 
         let pub_tkey: TeePubKey = http_client.tee_key.clone().unwrap()
             .export_tee_pub_key();
         let hushed_data = self.hash_data(pub_tkey.clone(), responce)
             .expect("AA - hash response failed");
         let hw_meas = aa.get_tee_evidence(hushed_data.clone()).unwrap();
-        req_type = HttpReq::Post(self.request_attestation(http_client.cookie.clone()));
+        req_type = HttpReq::Post(self.request_attestation(_http_client.cookie.clone()));
         let att_report = Connector::build_attest_report(pub_tkey,
             hw_meas, &req_type);
         let att_rep_res = Connector::send_request(&mut _http_client.tls_conn, att_report);
