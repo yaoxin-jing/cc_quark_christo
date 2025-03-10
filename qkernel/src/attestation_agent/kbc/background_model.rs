@@ -75,17 +75,10 @@ impl KbsClientT for KbsClient<BackgroundCkeck> {
     fn get_resource(&mut self, conn_client: &mut ConnectionClient, uri: super::ResourceUri)
         -> Result<Vec<u8>> {
         let mut http_client = conn_client.http_client.clone();
-    //    let resource_req = HttpReq::Get(self.request_resource(&_uri, "".to_string()));
-    //    let request = match resource_req {
-    //        HttpReq::Get(s) => s,
-    //        _ => {
-    //            panic!("not expected")
-    //        },
-    //    };
         let resource_req = HttpReq::Get(self.request_resource(&uri, conn_client.cookie.clone()));
-        let request = Connector::create_req_head(&resource_req);
+        let request = ConnectionClient::create_req_head(&resource_req);
         debug!("VM: send resource request:{:?}", request);
-        let resp_res = Connector::send_request(&mut conn_client.tls_conn, request);
+        let resp_res = conn_client.send_request(request);
         if resp_res.is_err() {
             debug!("VM: AA - resource req failed - return:{:?}", resp_res);
             return Err(Error::Common("Failed request".to_string()));
@@ -110,25 +103,6 @@ impl KbsClientT for KbsClient<BackgroundCkeck> {
             debug!("VM: AA - Plaintext:{:?}", text);
         }
         plaintext
-    //    let resp_res = Connector::send_request(&mut tls_conn, request);
-    //    self.conn_client.tls_conn.replace(tls_conn);
-    //    if resp_res.is_err() {
-    //        return resp_res;
-    //    }
-    //    let resp = RespType::Resource(resp_res.unwrap());
-    //    let kbs_resp_res = Connector::parse_http_responce(resp);
-    //    if kbs_resp_res.is_err() {
-    //        let _ = kbs_resp_res.as_ref().map_err(|e| {
-    //            return e;
-    //        });
-    //    }
-    //    let kbs_resp: KbsResponce = kbs_resp_res.unwrap();
-    //    let resource: kbs_types::Response = kbs_resp.resource.unwrap();
-    //    let plaintext: Result<Vec<u8>> = self.decrypt_resource(resource, todo!());
-    //    if plaintext.is_err() {
-    //        error!("AA - Decrypting resource failed");
-    //    }
-    //    plaintext
     }
 
     fn decrypt_payload(&mut self, _packet: super::AnnotationPacket) -> Result<Vec<u8>> {
@@ -150,12 +124,6 @@ impl<BackgroundCkeck> KbsClient<BackgroundCkeck> {
         -> Result<(Token, TeeKeyPair)> {
         let mut retry: u8 = 0;
         loop {
-            //let mut mclient = conn_client.http_client.clone();
-            //if mclient.tee_key.is_some() {
-            //    debug!("VM: http client cloned - TeeKeyPair generated");
-            //} else {
-            //    panic!("VM: http client cloned - no TeeKeyPair");
-            //}
             if retry < Self::KBS_RCAR_RETRY {
                 let _res = self.rcar_handshake(conn_client, tee.clone(), aa);
                 match _res {
@@ -197,9 +165,9 @@ impl<BackgroundCkeck> KbsClient<BackgroundCkeck> {
                 .expect("VM: AA - Failed to create TeeKeyPair");
         let pub_tkey: TeePubKey = tee_kp.export_tee_pub_key();
         let mut req_type = HttpReq::Post(self.request_challenge());
-        let challenge_request = Connector::build_request(tee, self.kbs_version.clone(),
+        let challenge_request = ConnectionClient::build_request(tee, self.kbs_version.clone(),
             "".to_string(), &req_type);
-        let challenge_req_res = Connector::send_request(&mut _http_client.tls_conn, challenge_request);
+        let challenge_req_res = _http_client.send_request(challenge_request);
         if challenge_req_res.is_err() {
             debug!("VM: RCAR handshake failed - talking to KBS failed.");
             let _ = challenge_req_res.as_ref().map_err(|e| {
@@ -219,16 +187,13 @@ impl<BackgroundCkeck> KbsClient<BackgroundCkeck> {
         _http_client.cookie = responce.cookie.clone().unwrap();
         debug!("VM: RCAR - cookie:{:?}", _http_client.cookie);
 
-       // let pub_tkey: TeePubKey = _http_client.tee_key.clone().unwrap()
-       //     .export_tee_pub_key();
-
         let hushed_data = self.hash_data(pub_tkey.clone(), responce)
             .expect("AA - hash response failed");
         let hw_meas = aa.get_tee_evidence(hushed_data.clone()).unwrap();
         req_type = HttpReq::Post(self.request_attestation(_http_client.cookie.clone()));
-        let att_report = Connector::build_attest_report(pub_tkey,
+        let att_report = ConnectionClient::build_attest_report(pub_tkey,
             hw_meas, &req_type);
-        let att_rep_res = Connector::send_request(&mut _http_client.tls_conn, att_report);
+        let att_rep_res = _http_client.send_request(att_report);
         if att_rep_res.is_err() {
             debug!("VM: RCAR handshake failed - talking to KBS failed.");
             let _ = att_rep_res.as_ref().map_err(|e| {
@@ -310,10 +275,8 @@ impl<BackgroundCkeck> KbsClient<BackgroundCkeck> {
     fn hash_data_sha512(pub_key: TeePubKey, nonce: String,
         runtime_measurement: Option<String>) -> Result<Vec<u8>> {
         use sha2::{Sha512, Digest};
-        //let mut to_hash: Vec<Vec<u8>> = vec![];
         debug!("VM: Hash runtime - Nonce:{:?}, Nonce-length:{}", nonce, nonce.len());
         let challenge = if let Some(sw_meas) = runtime_measurement {
-          //  to_hash.push(sw_meas.into_bytes());
             serde_json::json!({
                 "tee-pubkey": pub_key,
                 "nonce": nonce,
@@ -328,16 +291,9 @@ impl<BackgroundCkeck> KbsClient<BackgroundCkeck> {
         let binding = serde_json::to_string(&challenge)
             .unwrap();
         let challenge = binding.as_bytes();
-        //to_hash.push(nonce.into_bytes());
-        //to_hash.push(pub_key.k_mod.into_bytes());
-        //to_hash.push(pub_key.k_exp.into_bytes());
         let mut _h: Sha512  = Sha512::new();
-        //for block in to_hash {
-        //    _h.update(block);
-        //}
         _h.update(challenge);
         let _res = _h.finalize();
-        //let enc = Base64::encode_string(&res);
         let mut res: Vec<u8> = vec![];
         res.extend_from_slice(&_res);
         Ok(res)
@@ -346,10 +302,8 @@ impl<BackgroundCkeck> KbsClient<BackgroundCkeck> {
     fn hash_data_sha384(pub_key: TeePubKey, nonce: String,
         runtime_measurement: Option<String>) -> Result<Vec<u8>> {
         use sha2::{Sha384, Digest};
-        //let mut to_hash: Vec<Vec<u8>> = vec![];
         debug!("VM: Hash runtime - Nonce:{:?}, Nonce-length:{}", nonce, nonce.len());
         let challenge = if let Some(sw_meas) = runtime_measurement {
-          //  to_hash.push(sw_meas.into_bytes());
             serde_json::json!({
                 "tee-pubkey": pub_key,
                 "nonce": nonce,
@@ -364,21 +318,12 @@ impl<BackgroundCkeck> KbsClient<BackgroundCkeck> {
         let binding = serde_json::to_string(&challenge)
             .unwrap();
         let challenge = binding.as_bytes();
-        //to_hash.push(nonce.into_bytes());
-        //to_hash.push(pub_key.k_mod.into_bytes());
-        //to_hash.push(pub_key.k_exp.into_bytes());
         let mut _h: Sha384  = Sha384::new();
-        //for block in to_hash {
-        //    _h.update(block);
-        //}
         _h.update(challenge);
         let _res = _h.finalize();
-        //let enc = Base64::encode_string(&res);
         debug!("VM: Hashed Sha384: {:?} - length:{}", _res, _res.len());
         let mut res: Vec<u8> = vec![];
         res.extend_from_slice(&_res);
-
-        //let res = String::from_utf8_lossy(&res).to_string();
         Ok(res)
     }
 }
