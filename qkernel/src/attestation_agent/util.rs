@@ -308,7 +308,6 @@ pub(super) mod connection {
     pub struct ConnectionClient<'a> {
         pub http_client: Connector,
         pub tls_conn: TlsConnection<'a, Connector, Aes128GcmSha256>,
-        pub tee_key: Option<TeeKeyPair>,
         pub cookie: String,
     }
 
@@ -318,7 +317,7 @@ pub(super) mod connection {
         pub read_buf: Vec<u8>,
         pub read_buf_len: usize,
         pub retry_read_times: usize,
-        pub tee_key: Option<TeeKeyPair>,
+        //pub tee_key: Option<TeeKeyPair>,
         _addr: Option<Vec<u8, GuestHostSharedAllocator>>
     }
 
@@ -381,15 +380,15 @@ pub(super) mod connection {
             let _binding = _addr.ToVec().unwrap();
             let binding = _binding.to_vec_in(GUEST_HOST_SHARED_ALLOCATOR);
             let sock_addr = binding.as_slice();
-            let tk = TeeKeyPair::new(key_length, encr_alg)
-                .expect("VM: AA - Failed to create TeeKeyPair");
+           // let tk = TeeKeyPair::new(key_length, encr_alg)
+           //     .expect("VM: AA - Failed to create TeeKeyPair");
             sock_file_op.Connect(task, sock_addr, blocking)
                 .expect("AA - Socket connection failed");
 
             Self {
                 socket_file: socket,
                 read_buf: Vec::new(),
-                tee_key: Some(tk),
+                //tee_key: Some(tk),
                 //Arbitratry valuees
                 read_buf_len: Self::READ_BUFF_LEN,
                 retry_read_times: 10000,
