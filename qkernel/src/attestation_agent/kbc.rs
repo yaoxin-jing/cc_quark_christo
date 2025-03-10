@@ -34,7 +34,7 @@ pub enum KbsClientType {
 
 pub trait KbsClientT {
     fn get_token(&self, tee: String, conn_client: &mut ConnectionClient, aa: &AttestationAgent)
-        -> Result<(Token, TeeKeyPair/*, Option<Connector>*/)>;
+        -> Result<(Token, TeeKeyPair)>;
     fn update_token(&mut self, token: Option<Token>,
         tee_key_pair: Option<TeeKeyPair>) -> Result<()>;
     fn get_resource(&mut self, conn_client: &mut ConnectionClient, _uri: ResourceUri)
@@ -83,16 +83,12 @@ impl<T> KbsClient<T> {
 
     pub fn request_resource(&self, req_uri: &ResourceUri, cookie: String) -> String {
         let url = self.kbs_host_addres.clone();
-        //let mut cookie = "".to_string();
-       // if let Some(h) = &self.http_client {
-       //     cookie = h.cookie.clone();
-       // }
         let req = format!("/kbs/v0/resource/{}/{}/{} HTTP/1.1\r\nHost: {}\r\nCookie: {}\r\n\r\n",
             req_uri.repository.clone(), req_uri.r#type.clone(), req_uri.tag.clone(), url, cookie);
         req
     }
 
-    pub(crate) fn decrypt_resource(&self, resource: kbs_types::Response, tee_key: Option<TeeKeyPair>/*OntlyToTEST: next get it from self */) -> Result<Vec<u8>> {
+    pub(crate) fn decrypt_resource(&self, resource: kbs_types::Response, tee_key: Option<TeeKeyPair>) -> Result<Vec<u8>> {
         let protected: ProtectedHeader = serde_json::from_str(&resource.protected)
             .expect("Failed to deserialize ProtectedHeader");
         if !protected.alg.contains(tee_key.clone().unwrap().alg.as_str()) {
