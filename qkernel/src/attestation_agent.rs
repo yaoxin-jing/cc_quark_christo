@@ -19,15 +19,19 @@ pub mod util;
 
 use core::convert::TryFrom;
 
+use aes_gcm::aead::OsRng;
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use crate::attestation_agent::kbc::{KbsClient, KbsClientT};
+use crate::attestation_agent::util::connection::{tls_connection, ConnectionClient, HttpSClient};
 use crate::attestation_agent::util::ResourceUri;
 use crate::qlib::common::Result;
 use crate::{drivers::attestation::{Challenge, Response},
     qlib::{config::CCMode, kernel::arch::tee::{get_tee_type,
         is_hw_tee}}};
 
+#[cfg(target_arch = "aarch64")]
 use self::attester::cca;
 use self::kbc::{kbc_build, Kbc};
 use self::util::{AttestationToken, InitDataStatus};
@@ -47,7 +51,7 @@ pub trait AttestationAgentT {
         Ok(InitDataStatus::Unsupported)
     }
 
-    fn get_attestation_token(&mut self) -> Result<AttestationToken>;
+    fn get_attestation_token(&mut self, con_client: &mut ConnectionClient) -> Result<AttestationToken>;
 
     // Get measuremnt blob from TEE.
     fn get_tee_evidence(&self, challenge: Vec<u8>) -> Result<Response>;
@@ -69,10 +73,39 @@ impl AttestationAgent {
     pub fn try_attest(config_path: Option<String>, envv: Option<Vec<String>>) {
         let mut aa: AttestationAgent = Self::new(config_path, envv)
             .expect("AA - failed to create instance");
-        let token = aa.get_attestation_token()
+        let mut read_rec = [0u8; util::connection::HttpSClient::TLS_RECORD];
+        let mut write_rec = [0u8; util::connection::HttpSClient::TLS_RECORD];
+        let httpc = HttpSClient::create_http_client(aa.kbc.kbs_address(),
+            kbc::KBC_KEY_LENGTH, kbc::KBC_ENC_ALG.to_string());
+        let bind = httpc.clone();
+        let tls = tls_connection(&bind, &mut read_rec, &mut write_rec)
+            .map_err(|e| {
+                panic!("VM: AttAgent - Failed to create TLS connection to  KBS:{:?}",e);
+            })
+            .unwrap();
+        //aa.kbc.as_mut().update_intern_connect(tls, httpc);
+        let mut conn_client = ConnectionClient {
+            http_client: httpc,
+            tls_conn: tls,
+            tee_key: None,
+            cookie: "".to_string()
+        };
+        let token = aa.get_attestation_token(&mut conn_client)
             .expect("AA - failed to get Token");
         debug!("AA: Token:{:?}", token);
+        let _repo = String::from("default");
+        let _type = String::from("test");
+        let _tag = String::from("dummy");
+        let uri = crate::attestation_agent::util::ResourceUri {
+            kbs_address: aa.config.kbs_url(),
+            repository: _repo,
+            r#type: _type,
+            tag: _tag,
+            query: None};
 
+        let resource = aa.kbc.get_resource(&mut conn_client, uri)
+            .expect("Expected secret resource");
+        debug!("VM: Secret:{:?}", resource);
         //TODO:
         // Test p-2
         // a) Default
@@ -100,14 +133,17 @@ impl AttestationAgent {
        //     error!("AA - get resources failed for: {:?}",e);
        // });
        // debug!("AA - resource:{:?}", res);
+        //
+        //TODO: close connection / socket
     }
 
     pub fn new(config_path: Option<String>, env: Option<Vec<String>>) -> Result<Self> {
         let _attester = match get_tee_type() {
+            #[cfg(target_arch = "aarch64")]
             CCMode::Cca => Box::<cca::CcaAttester>::default(),
-            CCMode::SevSnp => todo!("implement me "),
             CCMode::Normal | CCMode::NormalEmu
-            | CCMode::None => panic!("AA: No AA instance for CC mode ::None")
+            | CCMode::None => panic!("AA: No AA instance for CC mode ::None"),
+            _ => todo!("implement me "),
         };
 
         let _config = AaConfig::new(config_path, env);
@@ -123,16 +159,13 @@ impl AttestationAgent {
 }
 
 impl AttestationAgentT for AttestationAgent {
-    fn get_attestation_token(&mut self) -> Result<AttestationToken> {
+    fn get_attestation_token(&mut self, con_client: &mut ConnectionClient) -> Result<AttestationToken> {
         let tee = self.get_hw_tee_type()
             .expect("VM: AA - expected HW TEE backup");
         let tee = String::try_from(tee).unwrap();
-        let (token, tkp, httpc) = self.kbc.as_ref().get_token(tee, &self)
-            .expect("AA - failed to get token");
+        let (token, tkp) = self.kbc.get_token(tee, con_client, &self)
+            .expect("VM: AA - failed to get token");
         let _ = self.kbc.update_token(Some(token.clone()), Some(tkp.clone()));
-        if httpc.is_some() {
-            self.kbc.update_intern(httpc.unwrap());
-        }
         Ok(token.inhalt.clone().as_bytes().to_vec())
     }
 

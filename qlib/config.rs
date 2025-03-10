@@ -170,3 +170,23 @@ impl CCMode {
         res
     }
 }
+
+use core::convert::TryFrom;
+use alloc::string::String;
+use crate::qlib::common::Result;
+
+impl TryFrom<CCMode> for String {
+    type Error = crate::qlib::common::Error;
+
+    fn try_from(cc_mode: CCMode) -> Result<String> {
+        let mode_str = match cc_mode {
+            CCMode::None => String::from("none"),
+            CCMode::Normal => String::from("normal"),
+            CCMode::NormalEmu => String::from("normalemu"),
+            CCMode::SevSnp => String::from("snp"),
+            CCMode::Cca => String::from("cca"),
+        };
+
+        Ok(mode_str)
+    }
+}
