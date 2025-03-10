@@ -300,6 +300,19 @@ pub fn Load(
 
     let mut stack = Stack::New(stackRange.End());
 
+   let mut aa_env_conf: Vec<String> = Vec::new();
+   for e in envv {
+       if e.contains("Q_AA_") {
+           aa_env_conf.push(e.clone());
+       }
+   }
+   let env_conf = if aa_env_conf.is_empty() {
+       None
+   } else {
+       Some(aa_env_conf)
+   };
+   crate::try_attest(None, env_conf);
+
     let usersp = SetupUserStack(
         task, &mut stack, &loaded, filename, &argv, envv, extraAuxv, vdsoAddr,
     )?;
