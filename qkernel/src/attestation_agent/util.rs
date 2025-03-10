@@ -311,6 +311,72 @@ pub(super) mod connection {
         pub cookie: String,
     }
 
+    impl ConnectionClient<'_> {
+        pub fn send_request(&mut self, request: String) -> Result<Vec<u8>> {
+            let mut rx_buf = [0u8; MemoryDef::PAGE_SIZE_4K as usize];
+            let send_buf = request.as_bytes();
+            let res = self.tls_conn.write(send_buf);
+            if res.is_err() {
+                return Err(ConnError::to_err(ConnError::TlsSockSend));
+            }
+            let read_bytes = self.tls_conn.read(&mut rx_buf);
+            if read_bytes.is_err() {
+                return Err(ConnError::to_err(ConnError::TlsSockRead));
+            }
+            let read_slice = rx_buf.as_slice();
+            let _data = read_slice[..read_bytes.unwrap()].to_vec();
+            Ok(_data)
+        }
+
+        pub fn create_req_head(request_type: &HttpReq) -> String {
+            let head = match request_type {
+                HttpReq::Get(_head) => {
+                    format!("GET {}", _head.as_str())
+                },
+                HttpReq::Post(_head) => {
+                    format!("POST {}", _head.as_str())
+                },
+            };
+            head
+        }
+
+        pub fn build_attest_report(pub_tee_key: TeePubKey, tee_evidence: String,
+            request_type: &HttpReq) -> String {
+            let att_report = AttestationReport {
+                pub_tkey: pub_tee_key,
+                evidence: serde_json::from_str(&tee_evidence)
+                    .expect("Failed to deserialize TEE evidence"),
+            };
+            let serialized_rep = serde_json::to_vec(&att_report)
+                .expect("VM: Failed to serialize attestation report");
+            let rep_len = serialized_rep.len();
+            let binding = Self::create_req_head(request_type);
+            let head = binding.as_str();
+            let report = format!("{}{}\r\n\r\n{}", head, rep_len,
+                String::from_utf8(serialized_rep).unwrap());
+            debug!("VM: the report is:\n{:?}", report);
+            report
+        }
+
+        pub fn build_request(tee_type: String, kbs_version: String, extra_params: String,
+            request_type: &HttpReq) -> String {
+            let req = Request{
+                protocol_version: kbs_version,
+                tee: tee_type,
+                extr_param: extra_params
+            };
+            let serialized_req = serde_json::to_string(&req)
+                .expect("VM: Failed to serialize kbs request");
+            let req_len = serialized_req.as_bytes().len();
+            let binding = Self::create_req_head(request_type);
+            let head = binding.as_str();
+            let request = format!("{}{}\r\n\r\n{}",head, req_len, serialized_req);
+            debug!("VM: the request is:\n{:?}", request);
+            request
+        }
+
+    }
+
     #[derive(Clone)]
     pub struct Connector {
         pub socket_file: Arc<File>,
@@ -450,70 +516,6 @@ pub(super) mod connection {
             assert!(bytes >= 0);
             read_buffer[0..(bytes as usize)].clone_from_slice(&resp_buff.buf[0..(bytes as usize)]);
             Ok(bytes)
-        }
-
-        pub fn send_request(tls_conn: &mut TlsConnection<Connector, Aes128GcmSha256>,
-            request: String) -> Result<Vec<u8>> {
-            let mut rx_buf = [0u8; MemoryDef::PAGE_SIZE_4K as usize];
-            let send_buf = request.as_bytes();
-            let res = tls_conn.write(send_buf);
-            if res.is_err() {
-                return Err(ConnError::to_err(ConnError::TlsSockSend));
-            }
-            let read_bytes = tls_conn.read(&mut rx_buf);
-            if read_bytes.is_err() {
-                return Err(ConnError::to_err(ConnError::TlsSockRead));
-            }
-            let read_slice = rx_buf.as_slice();
-            let _data = read_slice[..read_bytes.unwrap()].to_vec();
-            Ok(_data)
-        }
-
-        pub fn build_request(tee_type: String, kbs_version: String, extra_params: String,
-            request_type: &HttpReq) -> String {
-            let req = Request{
-                protocol_version: kbs_version,
-                tee: tee_type,
-                extr_param: extra_params
-            };
-            let serialized_req = serde_json::to_string(&req)
-                .expect("VM: Failed to serialize kbs request");
-            let req_len = serialized_req.as_bytes().len();
-            let binding = Self::create_req_head(request_type);
-            let head = binding.as_str();
-            let request = format!("{}{}\r\n\r\n{}",head, req_len, serialized_req);
-            debug!("VM: the request is:\n{:?}", request);
-            request
-        }
-
-        pub fn build_attest_report(pub_tee_key: TeePubKey,
-            tee_evidence: String, request_type: &HttpReq) -> String {
-            let att_report = AttestationReport {
-                pub_tkey: pub_tee_key,
-                evidence: serde_json::from_str(&tee_evidence)
-                    .expect("Failed to deserialize TEE evidence"),
-            };
-            let serialized_rep = serde_json::to_vec(&att_report)
-                .expect("VM: Failed to serialize attestation report");
-            let rep_len = serialized_rep.len();
-            let binding = Self::create_req_head(request_type);
-            let head = binding.as_str();
-            let report = format!("{}{}\r\n\r\n{}", head, rep_len,
-                String::from_utf8(serialized_rep).unwrap());
-            debug!("VM: the report is:\n{:?}", report);
-            report
-        }
-
-        pub fn create_req_head(request_type: &HttpReq) -> String {
-            let head = match request_type {
-                HttpReq::Get(_head) => {
-                    format!("GET {}", _head.as_str())
-                },
-                HttpReq::Post(_head) => {
-                    format!("POST {}", _head.as_str())
-                },
-            };
-            head
         }
 
         pub(crate) fn parse_http_responce(responce: RespType) -> Result<KbsResponce> {

@@ -83,9 +83,10 @@ impl KbsClientT for KbsClient<BackgroundCkeck> {
     //        },
     //    };
         let resource_req = HttpReq::Get(self.request_resource(&uri, conn_client.cookie.clone()));
-        let request = Connector::create_req_head(&resource_req);
+        let request = ConnectionClient::create_req_head(&resource_req);
         debug!("VM: send resource request:{:?}", request);
-        let resp_res = Connector::send_request(&mut conn_client.tls_conn, request);
+        //let resp_res = ConnectionClient::send_request(&mut conn_client.tls_conn, request);
+        let resp_res = conn_client.send_request(request);
         if resp_res.is_err() {
             debug!("VM: AA - resource req failed - return:{:?}", resp_res);
             return Err(Error::Common("Failed request".to_string()));
@@ -197,9 +198,10 @@ impl<BackgroundCkeck> KbsClient<BackgroundCkeck> {
                 .expect("VM: AA - Failed to create TeeKeyPair");
         let pub_tkey: TeePubKey = tee_kp.export_tee_pub_key();
         let mut req_type = HttpReq::Post(self.request_challenge());
-        let challenge_request = Connector::build_request(tee, self.kbs_version.clone(),
+        let challenge_request = ConnectionClient::build_request(tee, self.kbs_version.clone(),
             "".to_string(), &req_type);
-        let challenge_req_res = Connector::send_request(&mut _http_client.tls_conn, challenge_request);
+        //let challenge_req_res = ConnectionClient::send_request(&mut _http_client.tls_conn, challenge_request);
+        let challenge_req_res = _http_client.send_request(challenge_request);
         if challenge_req_res.is_err() {
             debug!("VM: RCAR handshake failed - talking to KBS failed.");
             let _ = challenge_req_res.as_ref().map_err(|e| {
@@ -226,9 +228,10 @@ impl<BackgroundCkeck> KbsClient<BackgroundCkeck> {
             .expect("AA - hash response failed");
         let hw_meas = aa.get_tee_evidence(hushed_data.clone()).unwrap();
         req_type = HttpReq::Post(self.request_attestation(_http_client.cookie.clone()));
-        let att_report = Connector::build_attest_report(pub_tkey,
+        let att_report = ConnectionClient::build_attest_report(pub_tkey,
             hw_meas, &req_type);
-        let att_rep_res = Connector::send_request(&mut _http_client.tls_conn, att_report);
+        //let att_rep_res = ConnectionClient::send_request(&mut _http_client.tls_conn, att_report);
+        let att_rep_res = _http_client.send_request(att_report);
         if att_rep_res.is_err() {
             debug!("VM: RCAR handshake failed - talking to KBS failed.");
             let _ = att_rep_res.as_ref().map_err(|e| {
