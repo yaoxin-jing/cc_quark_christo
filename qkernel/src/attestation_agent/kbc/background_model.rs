@@ -17,7 +17,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use sha2::Sha384;
 
-use crate::attestation_agent::util::connection::{tls_connection, ConnError, ConnectionClient, HttpReq, HttpSClient, KbsResponce, RespType};
+use crate::attestation_agent::util::connection::{tls_connection, ConnError, ConnectionClient, HttpReq, Connector, KbsResponce, RespType};
 use crate::attestation_agent::util::keys::{TeeKeyPair, TeePubKey};
 //use crate::attestation_agent::util::Resource;
 use crate::attestation_agent::{AttestationAgent, AttestationAgentT};
@@ -82,15 +82,15 @@ impl KbsClientT for KbsClient<BackgroundCkeck> {
     //        },
     //    };
         let resource_req = HttpReq::Get(self.request_resource(&uri, conn_client.cookie.clone()));
-        let request = HttpSClient::create_req_head(&resource_req);
+        let request = Connector::create_req_head(&resource_req);
         debug!("VM: send resource request:{:?}", request);
-        let resp_res = HttpSClient::send_request(&mut conn_client.tls_conn, request);
+        let resp_res = Connector::send_request(&mut conn_client.tls_conn, request);
         if resp_res.is_err() {
             debug!("VM: AA - resource req failed - return:{:?}", resp_res);
             return Err(Error::Common("Failed request".to_string()));
         }
         let resp = RespType::Resource(resp_res.unwrap());
-        let kbs_resp_res = HttpSClient::parse_http_responce(resp);
+        let kbs_resp_res = Connector::parse_http_responce(resp);
         if kbs_resp_res.is_err() {
             let _ = kbs_resp_res.as_ref().map_err(|e| {
                 return e;
@@ -109,13 +109,13 @@ impl KbsClientT for KbsClient<BackgroundCkeck> {
             debug!("VM: AA - Plaintext:{:?}", text);
         }
         plaintext
-    //    let resp_res = HttpSClient::send_request(&mut tls_conn, request);
+    //    let resp_res = Connector::send_request(&mut tls_conn, request);
     //    self.conn_client.tls_conn.replace(tls_conn);
     //    if resp_res.is_err() {
     //        return resp_res;
     //    }
     //    let resp = RespType::Resource(resp_res.unwrap());
-    //    let kbs_resp_res = HttpSClient::parse_http_responce(resp);
+    //    let kbs_resp_res = Connector::parse_http_responce(resp);
     //    if kbs_resp_res.is_err() {
     //        let _ = kbs_resp_res.as_ref().map_err(|e| {
     //            return e;
@@ -134,7 +134,7 @@ impl KbsClientT for KbsClient<BackgroundCkeck> {
         todo!("Support for ocrypt is not considert")
     }
 
-    fn update_intern(&mut self, http_client: HttpSClient) {
+    fn update_intern(&mut self, http_client: Connector) {
        // let _ = self.conn_client.http_client.replace(http_client);
     }
 }
@@ -193,9 +193,9 @@ impl<BackgroundCkeck> KbsClient<BackgroundCkeck> {
         debug!("VM: Do RCAR handshake");
         let mut http_client = _http_client.http_client.clone();
         let mut req_type = HttpReq::Post(self.request_challenge());
-        let challenge_request = HttpSClient::build_request(tee, self.kbs_version.clone(),
+        let challenge_request = Connector::build_request(tee, self.kbs_version.clone(),
             "".to_string(), &req_type);
-        let challenge_req_res = HttpSClient::send_request(&mut _http_client.tls_conn, challenge_request);
+        let challenge_req_res = Connector::send_request(&mut _http_client.tls_conn, challenge_request);
         if challenge_req_res.is_err() {
             debug!("VM: RCAR handshake failed - talking to KBS failed.");
             let _ = challenge_req_res.as_ref().map_err(|e| {
@@ -204,7 +204,7 @@ impl<BackgroundCkeck> KbsClient<BackgroundCkeck> {
         }
         let resp = challenge_req_res.unwrap();
         let resp_type = RespType::Challenge(resp);
-        let responce_res = HttpSClient::parse_http_responce(resp_type);
+        let responce_res = Connector::parse_http_responce(resp_type);
         if responce_res.is_err() {
             let _ = responce_res.as_ref().map_err(|e| {
                 debug!("VM: Response is err:{:?}",e);
@@ -222,9 +222,9 @@ impl<BackgroundCkeck> KbsClient<BackgroundCkeck> {
             .expect("AA - hash response failed");
         let hw_meas = aa.get_tee_evidence(hushed_data.clone()).unwrap();
         req_type = HttpReq::Post(self.request_attestation(http_client.cookie.clone()));
-        let att_report = HttpSClient::build_attest_report(pub_tkey,
+        let att_report = Connector::build_attest_report(pub_tkey,
             hw_meas, &req_type);
-        let att_rep_res = HttpSClient::send_request(&mut _http_client.tls_conn, att_report);
+        let att_rep_res = Connector::send_request(&mut _http_client.tls_conn, att_report);
         if att_rep_res.is_err() {
             debug!("VM: RCAR handshake failed - talking to KBS failed.");
             let _ = att_rep_res.as_ref().map_err(|e| {
@@ -233,7 +233,7 @@ impl<BackgroundCkeck> KbsClient<BackgroundCkeck> {
         }
         let res = att_rep_res.unwrap();
         let resp_type = RespType::Attestation(res);
-        let att_resp_res = HttpSClient::parse_http_responce(resp_type);
+        let att_resp_res = Connector::parse_http_responce(resp_type);
         if att_resp_res.is_err() {
             debug!("VM: RCAR handshake failed - attestation report parsing.");
             let _ = att_resp_res.as_ref().map_err(|e| {
@@ -254,15 +254,15 @@ impl<BackgroundCkeck> KbsClient<BackgroundCkeck> {
       //      tag: _tag,
       //      query: None};
       //  let resource_req = HttpReq::Get(self.request_resource(&uri, http_client.cookie.clone()));
-      //  let request = HttpSClient::create_req_head(&resource_req);
+      //  let request = Connector::create_req_head(&resource_req);
       //  debug!("VM: send resource request:{:?}", request);
-      //  let resp_res = HttpSClient::send_request(&mut _http_client.tls_conn, request);
+      //  let resp_res = Connector::send_request(&mut _http_client.tls_conn, request);
       //  if resp_res.is_err() {
       //      debug!("VM: AA - resource req failed - return:{:?}", resp_res);
       //      return Ok((token, http_client.tee_key.clone().unwrap()));
       //  }
       //  let resp = RespType::Resource(resp_res.unwrap());
-      //  let kbs_resp_res = HttpSClient::parse_http_responce(resp);
+      //  let kbs_resp_res = Connector::parse_http_responce(resp);
       //  if kbs_resp_res.is_err() {
       //      let _ = kbs_resp_res.as_ref().map_err(|e| {
       //          return e;

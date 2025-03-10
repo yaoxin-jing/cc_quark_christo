@@ -24,7 +24,7 @@ use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use crate::attestation_agent::kbc::{KbsClient, KbsClientT};
-use crate::attestation_agent::util::connection::{tls_connection, ConnectionClient, HttpSClient};
+use crate::attestation_agent::util::connection::{tls_connection, ConnectionClient, Connector};
 use crate::attestation_agent::util::ResourceUri;
 use crate::qlib::common::Result;
 use crate::{drivers::attestation::{Challenge, Response},
@@ -73,9 +73,9 @@ impl AttestationAgent {
     pub fn try_attest(config_path: Option<String>, envv: Option<Vec<String>>) {
         let mut aa: AttestationAgent = Self::new(config_path, envv)
             .expect("AA - failed to create instance");
-        let mut read_rec = [0u8; util::connection::HttpSClient::TLS_RECORD];
-        let mut write_rec = [0u8; util::connection::HttpSClient::TLS_RECORD];
-        let httpc = HttpSClient::create_http_client(aa.kbc.kbs_address(),
+        let mut read_rec = [0u8; util::connection::Connector::TLS_RECORD];
+        let mut write_rec = [0u8; util::connection::Connector::TLS_RECORD];
+        let httpc = Connector::create_http_client(aa.kbc.kbs_address(),
             kbc::KBC_KEY_LENGTH, kbc::KBC_ENC_ALG.to_string());
         let bind = httpc.clone();
         let tls = tls_connection(&bind, &mut read_rec, &mut write_rec)

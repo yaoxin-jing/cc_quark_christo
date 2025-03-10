@@ -283,13 +283,13 @@ pub(super) mod connection {
         Post(String),
     }
 
-    pub fn tls_connection<'a>(client: &'a HttpSClient, read_rec: &'a mut [u8],
+    pub fn tls_connection<'a>(client: &'a Connector, read_rec: &'a mut [u8],
         write_rec: &'a mut [u8])
-        -> core::result::Result<TlsConnection<'a, HttpSClient, Aes128GcmSha256>,
+        -> core::result::Result<TlsConnection<'a, Connector, Aes128GcmSha256>,
             embedded_tls::TlsError> {
         debug!("VM: create TLS connection");
         let tls_conf = TlsConfig::new().enable_rsa_signatures();
-        let mut tls_con: TlsConnection<HttpSClient, Aes128GcmSha256>
+        let mut tls_con: TlsConnection<Connector, Aes128GcmSha256>
             = TlsConnection::new(client.clone(), read_rec, write_rec);
         let mut rng = OsRng;
         let res = tls_con.open::<OsRng, NoVerify>(TlsContext::new(&tls_conf, &mut rng));
@@ -306,14 +306,14 @@ pub(super) mod connection {
     }
 
     pub struct ConnectionClient<'a> {
-        pub http_client: HttpSClient,
-        pub tls_conn: TlsConnection<'a, HttpSClient, Aes128GcmSha256>,
+        pub http_client: Connector,
+        pub tls_conn: TlsConnection<'a, Connector, Aes128GcmSha256>,
         pub tee_key: Option<TeeKeyPair>,
         pub cookie: String,
     }
 
     #[derive(Clone)]
-    pub struct HttpSClient {
+    pub struct Connector {
         pub socket_file: Arc<File>,
         pub read_buf: Vec<u8>,
         pub read_buf_len: usize,
@@ -323,7 +323,7 @@ pub(super) mod connection {
         _addr: Option<Vec<u8, GuestHostSharedAllocator>>
     }
 
-    impl HttpSClient {
+    impl Connector {
         const HTTP_OK: u16 = 200;
         const HTTP_HDR_COOKIE: &'static str = "set-cookie";
         const HTTP_HDR_CONT_LENGTH: &'static str = "content-length";
@@ -455,7 +455,7 @@ pub(super) mod connection {
             Ok(bytes)
         }
 
-        pub fn send_request(tls_conn: &mut TlsConnection<HttpSClient, Aes128GcmSha256>,
+        pub fn send_request(tls_conn: &mut TlsConnection<Connector, Aes128GcmSha256>,
             request: String) -> Result<Vec<u8>> {
             let mut rx_buf = [0u8; MemoryDef::PAGE_SIZE_4K as usize];
             let send_buf = request.as_bytes();
@@ -650,11 +650,11 @@ pub(super) mod connection {
         }
     }
 
-    impl embedded_io::ErrorType for HttpSClient {
+    impl embedded_io::ErrorType for Connector {
         type Error = embedded_tls::TlsError;
     }
 
-    impl embedded_io::Read for HttpSClient {
+    impl embedded_io::Read for Connector {
         fn read<'a>(&'a mut self, read_buffer: &'a mut [u8])
             -> core::result::Result<usize, Self::Error> {
             let sock_op = self.socket_file.FileOp.clone();
@@ -718,7 +718,7 @@ pub(super) mod connection {
         }
     }
 
-    impl embedded_io::Write for HttpSClient {
+    impl embedded_io::Write for Connector {
         fn write<'a>(&'a mut self, write_buf: &'a [u8])
             -> core::result::Result<usize, Self::Error> {
             let sock_op = self.socket_file.FileOp.clone();

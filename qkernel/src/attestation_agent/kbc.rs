@@ -23,7 +23,7 @@ use crate::qlib::common::Result;
 
 use self::background_model::BackgroundCkeck;
 
-use super::{util::{connection::{ConnectionClient, HttpSClient}, keys::TeeKeyPair, token::Token, AnnotationPacket, ProtectedHeader, ResourceUri}, AttestationAgent};
+use super::{util::{connection::{ConnectionClient, Connector}, keys::TeeKeyPair, token::Token, AnnotationPacket, ProtectedHeader, ResourceUri}, AttestationAgent};
 
 pub type Kbc = Box<dyn KbsClientT>;
 
@@ -34,13 +34,13 @@ pub enum KbsClientType {
 
 pub trait KbsClientT {
     fn get_token(&self, tee: String, conn_client: &mut ConnectionClient, aa: &AttestationAgent)
-        -> Result<(Token, TeeKeyPair/*, Option<HttpSClient>*/)>;
+        -> Result<(Token, TeeKeyPair/*, Option<Connector>*/)>;
     fn update_token(&mut self, token: Option<Token>,
         tee_key_pair: Option<TeeKeyPair>) -> Result<()>;
     fn get_resource(&mut self, conn_client: &mut ConnectionClient, _uri: ResourceUri)
         -> Result<Vec<u8>>;
     fn decrypt_payload(&mut self, packet: AnnotationPacket) -> Result<Vec<u8>>;
-    fn update_intern(&mut self, http_client: HttpSClient);
+    fn update_intern(&mut self, http_client: Connector);
     fn kbs_address(&self) -> String;
 }
 
