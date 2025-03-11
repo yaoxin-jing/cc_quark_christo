@@ -739,6 +739,7 @@ dependencies = [
  "spin",
  "x86_64",
  "xmas-elf",
+ "zeroize",
 ]
 
 [[package]]
