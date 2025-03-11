@@ -29,6 +29,7 @@ httparse = {version = "1.8.0", default-features = false }
 base64 = {version = "0.12.3", default-features = false, features = ["alloc"]}
 jwt-compact = {version = "0.8.0", default-features = false}
 kbs-types = {version = "0.7.0", default-features = false, features = ["alloc"]}
+zeroize = "1.6.0"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "0.14.7"
