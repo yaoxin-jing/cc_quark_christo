@@ -63,6 +63,7 @@ extern crate serde;
 extern crate jwt_compact;
 extern crate kbs_types;
 extern crate getrandom;
+extern crate zeroize;
 
 use core::panic::PanicInfo;
 use core::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
