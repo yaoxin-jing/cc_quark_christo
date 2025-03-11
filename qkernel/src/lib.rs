@@ -64,6 +64,7 @@ extern crate serde;
 extern crate getrandom;
 extern crate jwt_compact;
 extern crate kbs_types;
+extern crate zeroize;
 
 use alloc::vec::Vec;
 use core::panic::PanicInfo;
