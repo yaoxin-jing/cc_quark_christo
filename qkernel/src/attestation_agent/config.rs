@@ -73,16 +73,25 @@ impl AaConfig {
         self.kbs_config.cert.clone()
     }
 
-    pub fn kbs_resources(&self) -> Option<Vec<(String, String)>> {
-        self.kbs_config.resources.clone()
+    pub fn kbs_resources(&self) -> Option<&Vec<(String, Resource)>> {
+        self.kbs_config.resources.as_ref()
     }
+}
+
+#[derive(Deserialize, Default, Debug, Clone)]
+pub struct Resource {
+    pub repo: String,
+    pub r#type: String,
+    pub tag: String,
+    pub query: Option<String>,
+
 }
 
 #[derive(Deserialize, Default, Clone)]
 pub(self) struct KbsConfig {
     pub(self) url: String,
     pub(self) cert: Option<String>,
-    pub(self) resources: Option<Vec<(String, String)>>
+    pub(self) resources: Option<Vec<(String, Resource)>>
 }
 
 impl KbsConfig {
@@ -120,7 +129,7 @@ impl KbsConfig {
 
     fn new_from_envv(envv: Vec<String>) -> Result<Self> {
         let mut kbs_conf: KbsConfig = Default::default();
-        let mut requests: Vec<(String, String)> = Default::default();
+        let mut requests: Vec<(String, Resource)> = Default::default();
         for e in envv {
             if e.contains("KBS_ADDRESS") {
                 let address = e.strip_prefix("Q_AA_KBS_ADDRESS=")
@@ -135,11 +144,20 @@ impl KbsConfig {
                 }
             } else if e.contains("KBS_RESOURCE") {
                 let resource = e.strip_prefix("Q_AA_KBS_RESOURCE_")
-                    .expect("VM: AA - Expected resource_name=\"/resource/path\"");
+                    .expect("VM: AA - Expected resource_name=\"/path/in/kbs\"");
                 let mut iter = resource.split("=");
                 let name = iter.next().expect("AA - expected name").to_string();
-                let path = iter.next().expect("AA - expected path").to_string();
-                requests.push((name, path));
+                let mut path = iter.next()
+                    .expect("AA - expected path")
+                    .split("/");
+                let resource = Resource {
+                    repo: path.next().expect("Missing /repo/... name").to_string(),
+                    r#type: path.next().expect("Missing /.../type/... name").to_string(),
+                    tag: path.next().expect("Missing /.../.../tag name").to_string(),
+                    query: None,
+                };
+
+                requests.push((name, resource));
             }
         }
         if requests.is_empty() == false {

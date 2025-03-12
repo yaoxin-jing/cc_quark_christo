@@ -74,6 +74,8 @@ impl AttestationAgent {
     pub fn try_attest(config_path: Option<String>, envv: Option<Vec<String>>) {
         let mut aa: AttestationAgent = Self::new(config_path, envv)
             .expect("AA - failed to create instance");
+        let resource_list = aa.get_resource_list();
+        debug!("VM: Required resources: {:?}", resource_list);
         let mut read_rec = [0u8; util::connection::Connector::TLS_RECORD];
         let mut write_rec = [0u8; util::connection::Connector::TLS_RECORD];
         let httpc = Connector::create_connector(aa.kbc.kbs_address());
@@ -91,19 +93,23 @@ impl AttestationAgent {
         let token = aa.get_attestation_token(&mut conn_client)
             .expect("AA - failed to get Token");
         debug!("AA: Token:{:?}", token);
-        let _repo = String::from("default");
-        let _type = String::from("test");
-        let _tag = String::from("dummy");
-        let uri = ResourceUri {
-            kbs_address: aa.config.kbs_url(),
-            repository: _repo,
-            r#type: _type,
-            tag: _tag,
-            query: None};
+        for item in resource_list {
+            let resource = aa.kbc.get_resource(&mut conn_client, item);
+            debug!("VM: Secret:{:?}", resource);
+        }
+       // let _repo = String::from("default");
+       // let _type = String::from("test");
+       // let _tag = String::from("dummy");
+       // let uri = ResourceUri {
+       //     kbs_address: aa.config.kbs_url(),
+       //     repository: _repo,
+       //     r#type: _type,
+       //     tag: _tag,
+       //     query: None};
 
-        let resource = aa.kbc.get_resource(&mut conn_client, uri)
-            .expect("Expected secret resource");
-        debug!("VM: Secret:{:?}", resource);
+       // let resource = aa.kbc.get_resource(&mut conn_client, uri)
+       //     .expect("Expected secret resource");
+       // debug!("VM: Secret:{:?}", resource);
         //TODO:
         // b) From from ENV
         //
@@ -118,6 +124,25 @@ impl AttestationAgent {
        // debug!("AA - resource:{:?}", res);
         //
         //TODO: close connection / socket
+    }
+
+    fn get_resource_list(&self) -> Vec<ResourceUri> {
+        let mut resourse_list: Vec<ResourceUri> = vec![];
+        self.config.kbs_resources()
+            .inspect(|list| {
+                for item in *list {
+                    let i = item.1.clone();
+                    let uri = ResourceUri {
+                        kbs_address: self.config.kbs_url(),
+                        repository: i.repo,
+                        r#type: i.r#type,
+                        tag: i.tag,
+                        query: i.query,
+                    };
+                    resourse_list.push(uri);
+                }
+            });
+        resourse_list
     }
 
     pub fn new(_config_path: Option<String>, _env: Option<Vec<String>>) -> Result<Self> {
