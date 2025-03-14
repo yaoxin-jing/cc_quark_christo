@@ -28,6 +28,7 @@
 #![recursion_limit = "256"]
 #![allow(invalid_reference_casting)]
 #![feature(btreemap_alloc)]
+#![feature(sync_unsafe_cell)]
 
 #[macro_use]
 extern crate alloc;
@@ -124,6 +125,7 @@ mod interrupt;
 pub mod kernel_def;
 pub mod rdma_def;
 mod syscalls;
+pub mod drivers;
 
 #[global_allocator]
 pub static VCPU_ALLOCATOR: GlobalVcpuAllocator = GlobalVcpuAllocator::New();
