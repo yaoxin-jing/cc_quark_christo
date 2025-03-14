@@ -50,6 +50,19 @@ extern crate spin;
 #[cfg(target_arch = "x86_64")]
 extern crate x86_64;
 extern crate xmas_elf;
+//
+// Conf-Comp deps. - AttAg.
+//
+extern crate rsa;
+extern crate aes_gcm;
+extern crate embedded_tls;
+extern crate embedded_io;
+extern crate httparse;
+extern crate base64;
+extern crate serde;
+extern crate jwt_compact;
+extern crate kbs_types;
+extern crate getrandom;
 
 use core::panic::PanicInfo;
 use core::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
