@@ -67,7 +67,8 @@ extern crate getrandom;
 use core::panic::PanicInfo;
 use core::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 use core::{mem, ptr};
-
+#[cfg(target_arch = "aarch64")]
+use getrandom::register_custom_getrandom;
 use spin::mutex::Mutex;
 
 use qlib::mutex::*;
@@ -229,6 +230,37 @@ extern "C" {
 #[cfg(target_arch = "aarch64")]
 extern "C" {
     pub fn vector_table();
+}
+
+#[cfg(target_arch = "aarch64")]
+register_custom_getrandom!(aarch64_getrandom);
+
+#[cfg(target_arch = "aarch64")]
+pub fn aarch64_getrandom(dest: &mut [u8]) -> core::result::Result<(), getrandom::Error> {
+    let to_fill = dest.len();
+    let rounds= to_fill / 8 as usize; // 64Bits can be read once from RNDR
+    let remain = to_fill - (rounds * 8 as usize);
+    let mut _dest: Vec<u8> = Vec::with_capacity(to_fill);
+    for _ in 0..rounds {
+        let val: u64 = crate::qlib::kernel::asm::aarch64::get_rand()
+            .expect("VM: no rand generated - can not continue.");
+       let mut byte: u8;
+       for b in 0..8 {
+           byte = ((val >> (b * 8)) & 0xFFFF) as u8;
+           _dest.push(byte);
+       }
+    }
+    if remain != 0 {
+       let val = crate::qlib::kernel::asm::aarch64::get_rand()
+            .expect("VM: no rand generated - can not continue.");
+       let mut byte: u8;
+        for b in 0..remain {
+           byte = ((val >> (b * 8)) & 0xFFFF) as u8;
+           _dest.push(byte);
+        }
+    }
+    dest.copy_from_slice(&_dest[0..to_fill]);
+    Ok(())
 }
 
 pub fn Init() {
