@@ -184,7 +184,7 @@ impl TryFrom<CCMode> for String {
             CCMode::Normal => String::from("normal"),
             CCMode::NormalEmu => String::from("normalemu"),
             CCMode::SevSnp => String::from("snp"),
-            _ => String::from("invalid"),
+            CCMode::Cca => String::from("cca"),
         };
 
         Ok(mode_str)

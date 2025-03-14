@@ -18,7 +18,8 @@ pub mod util;
 pub mod kbc;
 
 use core::convert::{TryFrom, TryInto};
-
+#[cfg(target_arch = "aarch64")]
+use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use crate::attestation_agent::util::connection::{tls_connection,
@@ -33,6 +34,8 @@ use crate::{drivers::attestation::{Challenge, Response},
     qlib::{config::CCMode, kernel::arch::tee::{get_tee_type,
         is_hw_tee}}};
 
+#[cfg(target_arch = "aarch64")]
+use self::attester::cca;
 use self::kbc::{kbc_build, Kbc};
 use self::util::{AttestationToken, InitDataStatus};
 use self::{attester::Attester, config::AaConfig};
@@ -169,6 +172,8 @@ impl AttestationAgent {
 
     fn get_attester(mode: CCMode) -> Option<Attester> {
         match mode {
+            #[cfg(target_arch = "aarch64")]
+            CCMode::Cca => Some(Box::<cca::CcaAttester>::default()),
             CCMode::Normal | CCMode::NormalEmu
             | CCMode::None => {
                 error!("AA: No AA instance for CC mode:{:?}", mode);
