@@ -1,0 +1,52 @@
+// Copyright (c) 2021 Quark Container Authors / 2018 The gVisor Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use alloc::{string::String, vec::Vec};
+pub mod token;
+pub mod crypto;
+pub mod connection;
+
+pub type AttestationToken = Vec<u8>;
+
+pub enum InitDataStatus {
+    Match,
+    NoMatch,
+    Unsupported,
+}
+
+pub mod algorithem {
+    pub enum HashAlgo {
+        Sha256
+    }
+}
+
+//
+// See CoCo - attestation-agent - docs/KBS_URI.mD
+//
+#[derive(Debug, Default)]
+pub struct ResourceUri {
+    pub kbs_address: String,
+    pub repository: String,
+    pub r#type: String,
+    pub tag: String,
+    pub query: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default, Debug)]
+pub(crate) struct ProtectedHeader {
+    // Enc-Alg for encrypted key
+    pub alg: String,
+    // Enc-Alg for ciphertext
+    pub enc: String,
+}
