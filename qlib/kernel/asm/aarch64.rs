@@ -553,3 +553,23 @@ pub unsafe fn pan_set(val: bool) {
         asm!("msr pan, #0");
     }
 }
+
+pub fn get_rand() -> Option<u64> {
+    let mut val: u64;
+    let mut nzcv: u64;
+    let max_retry = 10;
+    for _ in 0..max_retry {
+        unsafe {
+            asm!(
+                "mrs {val}, rndr",
+                "mrs {nzcv}, nzcv",
+                val = out(reg) val,
+                nzcv = out(reg) nzcv,
+            );
+        }
+        if nzcv == 0 {
+            return Some(val);
+        }
+    }
+    None
+}
