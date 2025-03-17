@@ -72,6 +72,8 @@ extern crate sha2;
 extern crate yaxpeax_arch;
 #[cfg(feature = "snp")]
 extern crate yaxpeax_x86;
+#[cfg(target_arch = "x86_64")]
+extern crate serde_big_array;
 
 use core::panic::PanicInfo;
 use core::sync::atomic::{AtomicI32, AtomicUsize, Ordering};

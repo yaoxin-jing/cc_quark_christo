@@ -19,6 +19,9 @@ use crate::qlib::common::Result;
 
 use super::InitDataStatus;
 
+#[cfg(target_arch = "x86_64")]
+pub mod sev;
+
 pub trait AttesterT {
     fn get_tee_evidence(&self, challenge: &mut Challenge) -> Result<Response>;
 
