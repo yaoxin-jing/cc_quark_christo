@@ -300,6 +300,30 @@ pub fn Load(
 
     let mut stack = Stack::New(stackRange.End());
 
+    let mut aa_env_conf: Vec<String> = Vec::new();
+    let mut attest = true;
+
+    for e in envv {
+        if e.contains("Q_AA_") {
+            if e.contains("NO_ATTEST") {
+                attest = false;
+                break;
+            }
+            aa_env_conf.push(e.clone());
+        }
+    }
+
+    if attest {
+         let env_conf = if aa_env_conf.is_empty() {
+             None
+         } else {
+             Some(aa_env_conf)
+         };
+        crate::try_attest(None, env_conf);
+    } else {
+        info!("VM: No attestation has been performed.");
+    }
+
     let usersp = SetupUserStack(
         task, &mut stack, &loaded, filename, &argv, envv, extraAuxv, vdsoAddr,
     )?;
