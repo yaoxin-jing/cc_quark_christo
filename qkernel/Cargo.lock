@@ -736,6 +736,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
+ "sha2",
  "spin",
  "x86_64",
  "xmas-elf",
