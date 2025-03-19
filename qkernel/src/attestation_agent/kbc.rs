@@ -16,7 +16,10 @@ use aes_gcm::{aead::Aead, Aes256Gcm, Key, KeyInit, Nonce};
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 use zeroize::Zeroizing;
 
+pub mod background_model;
+
 use crate::qlib::common::{Result, Error};
+use self::background_model::BackgroundCkeck;
 
 use super::{util::{connection::ConnectionClient,
     crypto::TeeKeyPair, token::Token, ProtectedHeader,
@@ -126,10 +129,19 @@ impl<T> KbsClient<T> {
 }
 
 pub fn kbc_build(kbs_type: KbsClientType, url: String, cert: Option<String>) -> Kbc {
-    #[allow(unused)]
     let tee_kp = TeeKeyPair::new(KBC_KEY_LENGTH, KBC_ENC_ALG.to_string())
         .expect("VM: AA - Failed to create TeeKeyPair");
     match kbs_type {
+        KbsClientType::BckgCheck => {
+            return Box::new(KbsClient {
+                validation_type: BackgroundCkeck,
+                kbs_version: String::from("0.1.1"),
+                kbs_host_addres: url,
+                kbs_cert: cert,
+                tee_key: Some(tee_kp),
+                ..Default::default()
+            });
+        },
         _ => panic!("not supported")
     }
 }
