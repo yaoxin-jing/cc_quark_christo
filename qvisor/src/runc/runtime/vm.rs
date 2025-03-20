@@ -193,6 +193,9 @@ impl VirtualMachine {
         let tgid = unsafe { libc::gettid() };
 
         match get_tee_type() {
+            CCMode::TDX => {
+                self.spawn_vm_vcpus(&mut threads, 0, self.vcpus.len(), tgid);
+            }
             _ =>  {
                 self.spawn_vm_vcpus(&mut threads, 0, 1, tgid);
                 syncmgr::SyncMgr::WaitShareSpaceReady();
