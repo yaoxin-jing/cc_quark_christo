@@ -130,6 +130,8 @@ impl<T> KbsClient<T> {
 }
 
 pub fn kbc_build(kbs_type: KbsClientType, url: String, cert: Option<String>) -> Kbc {
+    let tee_kp = TeeKeyPair::new(KBC_KEY_LENGTH, KBC_ENC_ALG.to_string())
+            .expect("VM: AA - Failed to create TeeKeyPair");
     match kbs_type {
         KbsClientType::BckgCheck => {
             return Box::new(KbsClient {
@@ -137,6 +139,7 @@ pub fn kbc_build(kbs_type: KbsClientType, url: String, cert: Option<String>) -> 
                 kbs_version: String::from("0.1.1"),
                 kbs_host_addres: url,
                 kbs_cert: cert,
+                tee_key: Some(tee_kp),
                 ..Default::default()
             });
         },

@@ -60,13 +60,13 @@ impl KbsClientT for KbsClient<BackgroundCkeck> {
         Ok((token, tk_pair))
     }
 
-    fn update_token(&mut self, token: Option<Token>, tk_pair: Option<TeeKeyPair>)
+    fn update_token(&mut self, token: Option<Token>, _tk_pair: Option<TeeKeyPair>)
         -> Result<()> {
-        if token.is_none() || tk_pair.is_none() {
+        if token.is_none() || _tk_pair.is_none() {
             Err(Error::SystemErr(SysErr::EINVAL))
         } else {
             self.token = token;
-            self.tee_key = tk_pair;
+    //        self.tee_key = tk_pair;
             Ok(())
         }
     }
@@ -150,8 +150,7 @@ impl<BackgroundCkeck> KbsClient<BackgroundCkeck> {
     fn rcar_handshake(&self, http_client: &mut ConnectionClient, tee: String,
         aa: &AttestationAgent) -> Result<(Token, TeeKeyPair)> {
         debug!("VM: Do RCAR handshake");
-        let tee_kp = TeeKeyPair::new(KBC_KEY_LENGTH, KBC_ENC_ALG.to_string())
-                .expect("VM: AA - Failed to create TeeKeyPair");
+        let tee_kp = self.tee_key.clone().unwrap();
         let pub_tkey: TeePubKey = tee_kp.export_tee_pub_key();
         let mut req_type = HttpReq::Post(self.request_challenge());
         let challenge_request = ConnectionClient::build_request(tee, self.kbs_version.clone(),
