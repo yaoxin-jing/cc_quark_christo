@@ -21,6 +21,7 @@ use x86_64::VirtAddr;
 pub mod cpuid_page;
 pub mod ghcb;
 pub mod vc;
+pub mod secret_page;
 
 // The C-Bit mask indicating encrypted physical addresses
 pub static C_BIT_MASK: AtomicU64 = AtomicU64::new(0);
