@@ -19,6 +19,9 @@ use spin::{Mutex, lazy::Lazy};
 
 use crate::{qlib::{common::Result, kernel::arch::tee::get_tee_type}, CCMode};
 
+#[cfg(target_arch = "aarch64")]
+use super::cca::attestation::ArmCcaHwAttester;
+
 pub type Challenge = Vec<u8>;
 pub type Response = String;
 
@@ -63,6 +66,8 @@ pub struct AttestationDriver {
 impl Default for AttestationDriver {
     fn default() -> Self {
         let (tee_attester, tee_type): (Box<dyn AttestationDriverT>, CCMode) = match get_tee_type() {
+            #[cfg(target_arch = "aarch64")]
+            CCMode::Cca => (Box::new(ArmCcaHwAttester::default()), CCMode::Cca),
             _ => todo!("add me"),
         };
         Self {
@@ -99,6 +104,8 @@ impl AttestationDriver {
 
     fn tee_challenge_exp(&self) -> (usize, usize) {
         let res = match self.tee_type {
+            #[cfg(target_arch = "aarch64")]
+            CCMode::Cca => (32usize, 64usize),
             _ => todo!("add me"),
         };
         res
