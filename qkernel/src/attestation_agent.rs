@@ -182,6 +182,7 @@ impl AttestationAgent {
                 error!("AA: No AA instance for CC mode:{:?}", mode);
                 None
             },
+            #[cfg(target_arch = "x86_64")]
             CCMode::TDX => Some(Box::new(TdxAttester::default())),
             _ => {
                 error!("AA: Attestation currently not implmented for:{:?}", mode);
