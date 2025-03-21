@@ -19,6 +19,7 @@ pub mod kbc;
 
 use core::convert::TryFrom;
 
+use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use crate::attestation_agent::util::connection::{tls_connection,
@@ -33,6 +34,7 @@ use crate::{drivers::tee::attestation::{Challenge, Response},
     qlib::{config::CCMode, kernel::arch::tee::{get_tee_type,
         is_hw_tee}}};
 
+use self::attester::tdx::TdxAttester;
 use self::kbc::{kbc_build, Kbc};
 use self::util::{AttestationToken, InitDataStatus};
 use self::{attester::Attester, config::AaConfig};
@@ -180,6 +182,7 @@ impl AttestationAgent {
                 error!("AA: No AA instance for CC mode:{:?}", mode);
                 None
             },
+            CCMode::TDX => Some(Box::new(TdxAttester::default())),
             _ => {
                 error!("AA: Attestation currently not implmented for:{:?}", mode);
                 None
