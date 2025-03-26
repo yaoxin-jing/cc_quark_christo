@@ -1806,12 +1806,12 @@ impl VMSpace {
             pagetable::HugePageType::GB1 => {
                 info!("KernelMap1G start is {:x}, end is {:x}", start.0, end.0);
                 return self.pageTables
-                    .MapWith1G(start, end, physical, flags, &mut self.allocator, true);
+                    .MapWith1G(start, end, physical, flags, &mut self.allocator);
             },
             pagetable::HugePageType::MB2 => {
                 info!("KernelMap2MB start is {:x}, end is {:x}", start.0, end.0);
                 return self.pageTables
-                    .MapWith2MB(start, end, physical, flags, &mut self.allocator, true);
+                    .MapWith2MB(start, end, physical, flags, &mut self.allocator);
             }
         };
     }

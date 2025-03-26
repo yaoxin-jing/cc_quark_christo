@@ -656,19 +656,18 @@ impl PageTables {
         return Ok(false);
     }
 
+
+    // This function is only called when initializing the pagetable in qvisor,
+    // we should keep the user accessible flag on the first level table entry.
     pub fn MapWith2MB(&self, start: Addr, end: Addr, physical: Addr, flags: PageTableFlags,
-        pagePool: &Allocator, _kernel: bool) -> Result<bool> {
+        pagePool: &Allocator) -> Result<bool> {
         if (start.is_huge_page_aligned(HugePageType::MB2)
             && end.is_huge_page_aligned(HugePageType::MB2)) == false {
             error!("Mapping creation not possible - misaligned borders.");
             return Ok(false);
         }
         let mut currAddr = start;
-        let table_flags = if _kernel {
-            default_table_kernel()
-        } else {
-            default_table_user()
-        };
+        let table_flags = default_table_user();
         let pt: *mut PageTable = Self::adjust_address(self.GetRoot(), false) as *mut PageTable;
         unsafe {
             let mut l0_index = VirtAddr::new(currAddr.0).p4_index();
@@ -743,6 +742,8 @@ impl PageTables {
         Ok(true)
     }
 
+    // This function is only called when initializing the pagetable in qvisor,
+    // we should keep the user accessible flag on the first level table entry.
     pub fn MapWith1G(
         &self,
         start: Addr,
@@ -750,18 +751,13 @@ impl PageTables {
         physical: Addr,
         flags: PageTableFlags,
         pagePool: &Allocator,
-        _kernel: bool,
     ) -> Result<bool> {
         if start.0 & (MemoryDef::HUGE_PAGE_SIZE_1G - 1) != 0
             || end.0 & (MemoryDef::HUGE_PAGE_SIZE_1G - 1) != 0
         {
             panic!("start/end address not 1G aligned")
         }
-        let pt_flags = if _kernel {
-            default_table_kernel()
-        } else {
-            default_table_user()
-        };
+        let pt_flags = default_table_user();
 
         #[cfg(target_arch = "aarch64")]
         let hugepage_flags = flags & (!PageTableFlags::TABLE);
