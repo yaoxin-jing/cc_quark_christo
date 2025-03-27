@@ -257,6 +257,7 @@ impl Loader {
             &procArgs.Filename,
             &paths,
         )?;
+        debug!("VM: Paths:{:?}, Root process: {:?}", paths, procArgs.Filename);
 
         let mut ttyFileOps = None;
         if procArgs.Terminal {
@@ -303,9 +304,41 @@ impl Loader {
 
         let (entry, userStackAddr, kernelStackAddr) =
             kernel.LoadProcess(&procArgs.Filename, &procArgs.Envv, &mut procArgs.Argv)?;
+        //
+        // Try create a file
+        //
+        //let _content = "hello wold".as_bytes().to_vec();
+        //let list = vec![(String::from("test"), _content)];
+        Self::install_resource();
+        //
         return Ok((tid, entry, userStackAddr, kernelStackAddr));
     }
 
+    fn install_resource() {
+        use crate::syscalls::sys_file::{close, createAt};
+        use crate::syscalls::sys_write::Write;
+        use crate::qlib::cstring::CString;
+        let task = Task::Current();
+        let mode = ModeType::MODE_USER_READ | ModeType::MODE_GROUP_READ
+            | ModeType::MODE_OTHER_READ;
+        let flag = Flags::O_CREAT | Flags::O_RDWR;
+        let fname = CString::New("/opt/test");//format!("/opt/{}",name);
+        let addr = fname.Ptr();
+        let content = CString::New("hello world\n");
+        let fd = createAt(task, ATType::AT_FDCWD,
+            addr, flag as u32, FileMode(mode)).expect("crate failed");
+        if fd > 0i32 {
+            let size: i64 = content.Len() as i64;
+            let addr = content.Ptr();
+            let res = Write(task, fd, addr, size).map_err(|e| {
+                panic!("VM: write content failed:{:?}", e);
+            });
+            debug!("VM: wrote in file:{:?} bytes", res);
+            close(task, fd).expect("VM: failed to close fd");
+        } else {
+            panic!("VM: AA - failed to create file on guest");
+        }
+    }
     pub fn CreateSubContainer(&self, cid: String, fds: Vec<i32>) -> Result<()> {
         let tty = if fds.len() == 1 { fds[0] } else { -1 };
         let stdios = if fds.len() == 3 {
