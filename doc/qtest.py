@@ -52,39 +52,37 @@ def redis_ops(log_name, runtimes, tries=100000):
     for r in runtimes:
         if r != 'native':
             rtime = "--runtime="+r
-        tmp_file = log_name.as_posix() + r + '.csv'
-        command = f'docker run --rm {rtime} -p 6379:6379 --name some-redis --rm -it redis'
-        #check_ready = "nc -zv localhost 6379"
+        cname = r+'-redis'
+        tmp_file = log_name.as_posix() + '.'+ r + '.tmp'
+        command = f'docker run --rm {rtime} -p 6379:6379 --name {cname} --rm -it redis'
         check_ready = "ps -e|grep redis &> /dev/null; echo $?"
         check_op = f'redis-benchmark -n {tries} -c 20 --csv'
 
         with open(tmp_file, 'a', newline='') as f:
             print("file name:", tmp_file)
-            try:
-                pid = os.fork()
-                if pid == 0:
-                    subprocess.run(command, shell=True, stdout=subprocess.DEVNULL)
-                else:
-                    while True:
-                        time.sleep(2)
-                        result = subprocess.run(check_ready, shell=True, capture_output=True,
-                                                text=True)
-                        res = result.stdout.split()
-                        print("conn:", res[0])
-                        if res[0] == '0':
-                            break
-                    subprocess.run(check_op, shell=True, stdout=f,
-                                   stderr=subprocess.STDOUT, text=True)
-                    f.flush()
-                    os.kill(pid, signal.SIGTERM)
-                    os.waitpid(pid, 0)
-                    logs.append(tmp_file)
-            finally:
-                subprocess.run("docker rm -f some-redis", shell=True)
-        if len(logs) > 0:
-            _adjust_redis_res(logs)
-        else:
-            print("no logs from redis-ops")
+            pid = os.fork()
+            if pid == 0:
+                subprocess.run(command, shell=True, stdout=subprocess.DEVNULL)
+                return 0
+            else:
+                while True:
+                    time.sleep(2)
+                    result = subprocess.run(check_ready, shell=True, capture_output=True,
+                                            text=True)
+                    res = result.stdout.split()
+                    print("conn:", res[0])
+                    if res[0] == '0':
+                        break
+                subprocess.run(check_op, shell=True, stdout=f,
+                               stderr=subprocess.STDOUT, text=True)
+                f.flush()
+                os.kill(pid, signal.SIGKILL)
+                os.wait()
+                logs.append(tmp_file)
+    if len(logs) > 0:
+        _adjust_redis_res(logs)
+    else:
+        print("no logs from redis-ops")
 
 def _adjust_redis_res(files):
     res = {}
@@ -101,7 +99,8 @@ def _adjust_redis_res(files):
                     res[r[0]].append(r[1])
                 else:
                     res[r[0]] = [r[1]]
-    log_file = files[0].split('.')[0]
+    print("res:", res)
+    log_file = files[0].split('.')[0] + '.csv'
     with open(log_file, 'a', newline='') as f:
         _writer = csv.writer(f)
         _writer.writerow(header)
@@ -138,41 +137,70 @@ def _adjust_startup_res(src_fd, dest_file):
             _writer.writerow(header)
             _writer.writerow(row)
 
-def _median(file):
-    data = {}
-#    with open(file.as_posix(), 'r') as f:
-#        content = f.readlines()
-#        runtime = ""
-#        times = int((content[0].split(','))[-1].split(':')[-1].replace('\n', ''))
-#        for i in range(0, len(content) - times, times + 2):
-#            head = content[i].split(',')
-#            runtime = head[1].split(':')[-1]
-#            sum = 0
-#            for j in range(0, times):
-#                sum = sum + float(content[i+2+j].replace('\n', ''))
-#            data[runtime] = sum / times
-#    print(data)
-    return data
+def _ylabel(test):
+    match test:
+        case 'startup':
+            return 'ms'
+        case 'redis-ops':
+            return 'Req/s'
 
 def build_plot(file):
-    data = _median(file)
-    plt.figure(figsize=(3,3))
-    names = []
-    val = []
-    for k, v in data.items():
-        names.append(k)
-        val.append(v)
-    x = np.array(names)
-    y = np.array(val)
-    plt.bar(x, y)
+    test = file.as_posix().split('/')[-2]
+    # Load data from CSV
+    data = np.genfromtxt(file, delimiter=',', dtype=None, names=True, encoding=None)
+    # Extract data and convert categories to alphabetical letters
+    value_columns = data.dtype.names[1:]  # ['native', 'runsc']
+    raw_categories = np.atleast_1d(data[data.dtype.names[0]])  # ['startup']
+    # Create letter-category mapping
+    letter_to_category = {}
+    alphabet_letters = [chr(65 + i) for i in range(26)]  # A-Z
+    categories = []
+    for i, cat in enumerate(raw_categories):
+        letter = alphabet_letters[i] if i < 26 else f'Z_{i+1}'
+        categories.append(letter)
+        letter_to_category[letter] = cat
+
+    values = np.array([np.atleast_1d(data[col]) for col in value_columns])
+    # Create plot
+    fig, ax = plt.subplots(figsize=(10, 6))
+    n_categories = len(categories)
+    n_values = len(value_columns)
+    width = 0.8 / max(n_values, 1)
+    x = np.arange(n_categories)
+    # Plot with distinct colors
+    colors = plt.cm.tab10(np.linspace(0, 1, n_values))
+    for i in range(n_values):
+        offset = width * i - width * (n_values - 1) / 2
+        bars = ax.bar(x + offset, values[i], width,
+                     label=value_columns[i], color=colors[i])
+    # Customize axes
+    ax.set_xticks(x)
+    ax.set_xticklabels(categories)
+    ax.set_xlabel('Categories (Letters)')
+    ax.set_ylabel(_ylabel(test))
+    ax.set_title(test)
+    ax.grid(axis='y', alpha=0.3)
+    # Create comprehensive legend
+    handles, labels = ax.get_legend_handles_labels()
+    # Add letter-category mapping to legend
+    mapping_entries = []
+    for letter in categories:
+        mapping_entries.append(f"{letter} = {letter_to_category[letter]}")
+    # Create legend with three parts
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        *[Line2D([0], [0], color=colors[i], lw=4, label=value_columns[i])
+         for i in range(n_values)],
+        Line2D([0], [0], marker='', color='w', label='\n'.join(mapping_entries))
+    ]
+    ax.legend(handles=legend_elements,
+              title='Legend:\nMetrics & Category Mapping',
+              bbox_to_anchor=(1.25, 1),
+              loc='upper right')
+    plt.tight_layout()
     plt.show()
 
 def main():
-    #_adjust_redis_res(['/tmp/redis-ops/09-04-2025_12-47-57.tmp.native.csv'])
-    #return 0
-    #_adjust_startup_res('/tmp/startup/09-04-2025_16-20-28.csv.tmp',
-    #                    '/tmp/startup/09-04-2025_16-20-28.csv')
-    #return 0
     argpars = argparse.ArgumentParser()
     argpars.add_argument('--type', help='Performance measurement or plot collected data',
                          choices=['startup', 'redis-ops', 'plot'], default='startup')
