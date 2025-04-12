@@ -45,6 +45,64 @@ def startup_time(log_name, runtimes=["quark"], tries=10):
     _adjust_startup_res(tmp_file, log_name)
     subprocess.run(f"docker rm -f {cid}", shell=True, stdout=subprocess.DEVNULL,
                                         stderr=subprocess.STDOUT)
+def nginx_ops(log_name, runtimes, tries=100000):
+    rtime = ""
+    logs = []
+    for r in runtimes:
+        if r != 'native':
+            rtime = "--runtime="+r
+        cname = r+'-nginx'
+        tmp_file = log_name.as_posix() + '.'+ r + '.tmp'
+        command = f'docker run --rm {rtime} -p 80:80 --name {cname} --rm -it nginx'
+        check_ready = "ps -e|grep nginx &> /dev/null; echo $?"
+        check_op = f'ab -n {tries} -c 10 http://localhost/index.html'
+
+        with open(tmp_file, 'a', newline='') as f:
+            print("file name:", tmp_file)
+            pid = os.fork()
+            if pid == 0:
+                subprocess.run(command, shell=True, stdout=subprocess.DEVNULL)
+                return 0
+            else:
+                while True:
+                    time.sleep(2)
+                    result = subprocess.run(check_ready, shell=True, capture_output=True,
+                                            text=True)
+                    res = result.stdout.split()
+                    print("conn:", res[0])
+                    if res[0] == '0':
+                        break
+                subprocess.run(check_op, shell=True, stdout=f,
+                               stderr=subprocess.STDOUT, text=True)
+                f.flush()
+                os.kill(pid, signal.SIGKILL)
+                os.wait()
+                logs.append(tmp_file)
+    if len(logs) > 0:
+        _adjust_nginx_res(logs)
+    else:
+        print("no logs from redis-ops")
+
+def _adjust_nginx_res(logs):
+    data = ['GET']
+    header = ["test"]
+    for f in logs:
+        runtime = f.split('.')[-2]
+        header.append(runtime)
+        with open(f, 'r', newline='') as fd:
+            content = fd.readlines()
+            print(content)
+            for line in content:
+                if 'Requests ' in line:
+                    rps = line.split()[-3]
+                    data.append(rps)
+                    break
+    print("data:", data)
+    log_file = logs[0].split('.')[0] + '.csv'
+    with open(log_file, 'a', newline='') as f:
+        _writer = csv.writer(f)
+        _writer.writerow(header)
+        _writer.writerow(data)
 
 def redis_ops(log_name, runtimes, tries=100000):
     rtime = ""
@@ -123,7 +181,7 @@ def _adjust_startup_res(src_fd, dest_file):
             sum = 0
             for j in range(0, times):
                 sum = sum + float(content[i+2+j].replace('\n', ''))
-            data[runtime] = "%.9f" % (sum / times)
+                data[runtime] = "%.9f" % (sum / times)
         print(data)
         with open(dest_file, 'a', newline='') as _csv:
             header = ['test']
@@ -142,6 +200,8 @@ def _ylabel(test):
         case 'startup':
             return 'ms'
         case 'redis-ops':
+            return 'Req/s'
+        case 'nginx-ops':
             return 'Req/s'
 
 def build_plot(file):
@@ -203,7 +263,7 @@ def build_plot(file):
 def main():
     argpars = argparse.ArgumentParser()
     argpars.add_argument('--type', help='Performance measurement or plot collected data',
-                         choices=['startup', 'redis-ops', 'plot'], default='startup')
+                         choices=['startup', 'redis-ops', 'nginx-ops', 'plot'], default='startup')
     argpars.add_argument('--runtime', help='Select the runtime for tests (not applyed for "plot")',
                          choices=['all', 'native', 'runsc', 'quark'], nargs='+', default=['all'])
     log_path_pars = argparse.ArgumentParser(parents=[argpars], add_help=False)
@@ -230,6 +290,8 @@ def main():
                     startup_time(lname, runtimes)
                 case 'redis-ops':
                     redis_ops(lname, runtimes)
+                case 'nginx-ops':
+                    nginx_ops(lname, runtimes)
                 case _:
                     print(f'Error: command \'cmd_type\' not implemented')
                     return 1
