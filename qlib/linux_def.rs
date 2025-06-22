@@ -3052,7 +3052,7 @@ impl MemoryDef {
     pub const IO_HEAP_END: u64 = Self::HEAP_END + Self::IO_HEAP_SIZE;
 
     // Create 24GB Init memory region for KVM VM
-    pub const KERNEL_MEM_INIT_REGION_SIZE: u64 = 24; // 24 GB
+    pub const KERNEL_MEM_INIT_REGION_SIZE: u64 = 25; // 24 GB
 
     // start address for memmap and dynamic load address space, there is heap address space between PHY_UPPER_ADDR + VIR_MMAP_START
     pub const VIR_MMAP_START: u64 = Self::PHY_UPPER_ADDR + 128 * Self::ONE_GB; // 512GB + 128 GB
@@ -3103,11 +3103,19 @@ impl MemoryDef {
 
 #[cfg(feature = "tdx")]
 impl MemoryDef {
+    pub const fn align_up(value: u64, alignment: u64) -> u64 {
+        (value + alignment - 1) & !(alignment - 1)
+    }
+
     pub const TDVF_OFFSET: u64 = 0xff00_0000;
     pub const TDVF_SIZE: u64 = 16 * Self::ONE_MB;
     pub const VM_REGS_OFFSET: u64 = Self::RDMA_GLOBAL_SHARE_OFFSET + Self::RDMA_GLOBAL_SHARE_SIZE;
     pub const VM_REGS_SIZE: u64 = Self::PAGE_SIZE_2M;
-    pub const FILE_MAP_OFFSET: u64 = Self::VM_REGS_OFFSET + Self::VM_REGS_SIZE;
+    // Round up to next 1GiB to ensure kernel region size is 1GiB-aligned
+    pub const FILE_MAP_OFFSET: u64 = Self::align_up(
+        Self::VM_REGS_OFFSET + Self::VM_REGS_SIZE,
+        Self::ONE_GB,
+    );
     pub const SHIM_MEMORY_BASE: u64 = 0x0;
     pub const SHIM_MEMORY_SIZE: u64 = 2 * Self::ONE_GB;
 }
