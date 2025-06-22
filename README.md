@@ -85,6 +85,7 @@ for the aarch64 build)
 ```sh
 rustup toolchain install nightly-2023-12-11-x86_64-unknown-linux-gnu
 rustup default nightly-2023-12-11-x86_64-unknown-linux-gnu
+rustup component add rust-src --toolchain nightly-2023-12-31
 ```
 
 Add the rust-src component to the current toolchain:
@@ -106,7 +107,7 @@ Also, some extra libraries for compiling RDMA module:
 ```sh
 sudo apt-get install build-essential cmake gcc libudev-dev libnl-3-dev \
 libnl-route-3-dev ninja-build pkg-config valgrind python3-dev cython3 \
-python3-docutils pandoc libclang-dev
+python3-docutils pandoc libclang-dev nasm
 ```
 
 And also some extra libraries for compiling GPU module:  
