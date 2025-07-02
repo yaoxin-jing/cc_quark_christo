@@ -1380,7 +1380,7 @@ dependencies = [
 [[package]]
 name = "tdx"
 version = "0.1.0"
-source = "git+https://github.com/123abcpp/tdx.git?branch=quark#190395f0561173c8e9ae15c6701494e106363d20"
+source = "git+https://github.com/yaoxin-jing/tdx.git?branch=quark#4e70bb75c675e2b07f0d6b227fca8bfce6b50558"
 dependencies = [
  "bitflags 2.6.0",
  "kvm-bindings",

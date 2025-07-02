@@ -396,14 +396,83 @@ impl VmType for VmTDX {
 
     fn create_kvm_vm(&mut self, kvm_fd: i32) -> Result<(Kvm, VmFd), Error> {
         let kvm = unsafe { Kvm::from_raw_fd(kvm_fd) };
-        let (mut tdx_vm, vmfd) = TdxVm::new(&kvm, VMS.lock().vcpuCount as u64).unwrap();
-        let caps = tdx_vm.get_capabilities(&vmfd).unwrap();
+    
+        // Create TDX VM
+        let (mut tdx_vm, vmfd) = TdxVm::new(&kvm, VMS.lock().vcpuCount as u64)
+            .map_err(|e| Error::Common(format!("TdxVm::new failed: {:?}", e)))?;
+    
+        // Get TDX capabilities
+        let caps = tdx_vm
+            .get_capabilities(&vmfd)
+            .map_err(|e| Error::Common(format!("get_capabilities failed: {:?}", e)))?;
+    
+        // Parse firmware before init_vm
+        let mut firmware = std::fs::File::open("/usr/local/bin/shim.bin")
+            .map_err(|e| Error::Common(format!("Open firmware failed: {:?}", e)))?;
+    
+        let firmware_len = firmware
+            .metadata()
+            .map_err(|e| Error::Common(format!("firmware metadata failed: {:?}", e)))?
+            .len();
+    
+        assert_eq!(
+            firmware_len,
+            MemoryDef::TDVF_SIZE,
+            "Wrong firmware length!"
+        );
+    
+        let firmware_ptr = ram_mmap(firmware_len, firmware.as_raw_fd());
+    
+        // Build RAM layout for TDX measurement
+        let mut sections = tdvf::parse_sections(&mut firmware)
+            .map_err(|e| Error::Common(format!("parse_sections failed: {:?}", e)))?;
+    
+        let mut ram_array = Vec::new();
+        ram_array.push(TdxRamEntry {
+            address: 0,
+            length: 2 * MemoryDef::ONE_GB,
+            ram_type: TdxRamType::RamUnaccepted,
+        });
+    
+        tdvf::handle_firmware_entries(&mut ram_array, &mut sections, firmware_ptr)
+            .map_err(|e| Error::Common(format!("handle_firmware_entries failed: {:?}", e)))?;
+    
+        let hob_section = tdvf::get_hob_section(&sections)
+            .ok_or_else(|| Error::Common("HOB section missing".into()))?;
+    
+        tdvf::hob_create(ram_array, *hob_section)
+            .map_err(|e| Error::Common(format!("hob_create failed: {:?}", e)))?;
+    
+        // ✅ Register required memory before calling init_vm
+        set_user_memory_region_tdx(
+            &vmfd,
+            MemoryDef::TDVF_OFFSET,
+            firmware_ptr,
+            MemoryDef::TDVF_SIZE,
+            5,
+        );
+    
+        let firmware_ram_hva = ram_mmap(MemoryDef::SHIM_MEMORY_SIZE, -1);
+        set_user_memory_region_tdx(
+            &vmfd,
+            MemoryDef::SHIM_MEMORY_BASE,
+            firmware_ram_hva,
+            MemoryDef::SHIM_MEMORY_SIZE,
+            6,
+        );
 
+        // Now pass to init_vm
+        let kvm_cpuid = tdx_vm
+            .init_vm(&kvm, &caps, &vmfd)
+            .map_err(|e| Error::Common(format!("init_vm failed: {:?}", e)))?;
+    
+        // GPAW sanity check
         let s_bit = tdx_vm.phys_bits - 1;
         assert!(s_bit == 47 || s_bit == 51, "invalid gpaw!");
         S_BIT_NUM.store(s_bit as u64, Ordering::Release);
         S_BIT_MASK.store(1 << S_BIT_NUM.load(Ordering::Acquire), Ordering::Release);
-        let kvm_cpuid = tdx_vm.init_vm(&kvm, &caps, &vmfd).unwrap();
+    
+        // CPUID debug
         let nent = kvm_cpuid.as_fam_struct_ref().nent as usize;
         let entries = unsafe { kvm_cpuid.as_fam_struct_ref().entries.as_slice(nent) };
         for entry in entries {
@@ -418,40 +487,33 @@ impl VmType for VmTDX {
                 entry.edx
             );
         }
-
+    
+        // Check KVM capability
         if !kvm.check_extension(Cap::ImmediateExit) {
-            panic!("Can not create VM - KVM_CAP_IMMEDIATE_EXIT is not supported.");
+            return Err(Error::Common("KVM_CAP_IMMEDIATE_EXIT not supported".into()));
         }
-
-        //parse firmware
-        let mut firmware = std::fs::File::open("/usr/local/bin/shim.bin").unwrap();
-        let firmware_len = firmware.metadata()?.len();
-        assert_eq!(firmware_len, MemoryDef::TDVF_SIZE, "Wrong firmware length!");
-        let firmware_ptr = ram_mmap(firmware_len, firmware.as_raw_fd());
-
-        let mut sections = tdvf::parse_sections(&mut firmware).unwrap();
-        let mut ram_array = Vec::new();
-        ram_array.push(TdxRamEntry {
-            address: 0,
-            length: 2 * MemoryDef::ONE_GB,
-            ram_type: TdxRamType::RamUnaccepted,
-        });
-        tdvf::handle_firmware_entries(&mut ram_array, &mut sections, firmware_ptr)
-            .expect("Unable to handle firmware entries!");
-        let hob_section = tdvf::get_hob_section(&sections).unwrap();
-        tdvf::hob_create(ram_array, *hob_section).expect("Failed to create hobs!");
-
+    
+        // Enable exit filtering for HLT and MWAIT
         let mut cap: kvm_enable_cap = Default::default();
         cap.cap = kvm_bindings::KVM_CAP_X86_DISABLE_EXITS;
         cap.args[0] = (kvm_bindings::KVM_X86_DISABLE_EXITS_HLT
             | kvm_bindings::KVM_X86_DISABLE_EXITS_MWAIT) as u64;
-        vmfd.enable_cap(&cap).unwrap();
+        vmfd.enable_cap(&cap).map_err(|e| {
+            Error::Common(format!(
+                "enable_cap KVM_CAP_X86_DISABLE_EXITS failed: {:?}",
+                e
+            ))
+        })?;
+    
+        // Save VM state into struct
         self.tdx_vm = Some(tdx_vm);
         self.firmware_ptr = firmware_ptr;
         self.sections = Some(sections);
         self.kvm_cpuid = RefCell::new(Some(kvm_cpuid));
+    
         Ok((kvm, vmfd))
     }
+    
 
     fn init_share_space(
         vcpu_count: usize,
@@ -650,6 +712,7 @@ impl VmType for VmTDX {
         Ok(())
     }
 }
+
 
 fn set_user_memory_region_tdx(vm_fd: &VmFd, gpa: u64, hva: u64, size: u64, slot: u32) {
     const KVM_MEM_PRIVATE: u32 = 1u32 << 2;
