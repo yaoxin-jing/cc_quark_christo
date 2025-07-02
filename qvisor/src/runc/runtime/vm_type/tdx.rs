@@ -311,7 +311,11 @@ impl VmType for VmTDX {
             .unwrap();
         let kmem_private_region = fmap_base_guest - kmem_base_guest;
 
-        set_user_memory_region_tdx(
+        info!(
+            "vm_memory_initialize 1"
+        );
+
+        register_tdx_region(
             vm_fd,
             kmem_base_guest,
             kmem_base_host,
@@ -319,42 +323,57 @@ impl VmType for VmTDX {
             1,
         );
 
+        info!(
+            "vm_memory_initialize 2"
+        );
         let (pheap_base_host, pheap_base_guest, pheap_region) = self
             .vm_resources
             .mem_area_info(MemAreaType::PrivateHeapArea)
             .unwrap();
-
-        set_user_memory_region_tdx(vm_fd, pheap_base_guest, pheap_base_host, pheap_region, 2);
-        set_user_memory_region_tdx(vm_fd, fmap_base_guest, fmap_base_host, fmap_region, 3);
-
+        info!(
+            "vm_memory_initialize 3"
+        );
+            register_tdx_region(vm_fd, pheap_base_guest, pheap_base_host, pheap_region, 2);
+            register_tdx_region(vm_fd, fmap_base_guest, fmap_base_host, fmap_region, 3);
+            info!(
+                "vm_memory_initialize 4"
+            );
         let (shared_heap_base_host, shared_heap_base_guest, shared_heap_region) = self
             .vm_resources
             .mem_area_info(MemAreaType::SharedHeapArea)
             .unwrap();
 
-        set_user_memory_region_tdx(
+            register_tdx_region(
             vm_fd,
             shared_heap_base_guest,
             shared_heap_base_host,
             shared_heap_region,
             4,
         );
-        set_user_memory_region_tdx(
+        info!(
+            "vm_memory_initialize 5"
+        );
+        register_tdx_region(
             vm_fd,
             MemoryDef::TDVF_OFFSET,
             self.firmware_ptr,
             MemoryDef::TDVF_SIZE,
             5,
         );
+        info!(
+            "vm_memory_initialize 6"
+        );
         let firmware_ram_hva = ram_mmap(MemoryDef::SHIM_MEMORY_SIZE, -1);
-        set_user_memory_region_tdx(
+        register_tdx_region(
             vm_fd,
             MemoryDef::SHIM_MEMORY_BASE,
             firmware_ram_hva,
             MemoryDef::SHIM_MEMORY_SIZE,
             6,
         );
-
+        info!(
+            "vm_memory_initialize 7"
+        );
         info!(
             "KernelMemRegion - Guest-phyAddr:{:#x}, host-VA:{:#x}, page mmap-size:{} MB",
             kmem_base_guest,
@@ -443,24 +462,31 @@ impl VmType for VmTDX {
         tdvf::hob_create(ram_array, *hob_section)
             .map_err(|e| Error::Common(format!("hob_create failed: {:?}", e)))?;
     
-        // ✅ Register required memory before calling init_vm
-        set_user_memory_region_tdx(
-            &vmfd,
-            MemoryDef::TDVF_OFFSET,
-            firmware_ptr,
-            MemoryDef::TDVF_SIZE,
-            5,
-        );
-    
-        let firmware_ram_hva = ram_mmap(MemoryDef::SHIM_MEMORY_SIZE, -1);
-        set_user_memory_region_tdx(
-            &vmfd,
-            MemoryDef::SHIM_MEMORY_BASE,
-            firmware_ram_hva,
-            MemoryDef::SHIM_MEMORY_SIZE,
-            6,
-        );
-
+            info!(
+                "create_kvm_vm 1"
+            );
+        // // ✅ Register required memory before calling init_vm
+        // register_tdx_region(
+        //     &vmfd,
+        //     MemoryDef::TDVF_OFFSET,
+        //     firmware_ptr,
+        //     MemoryDef::TDVF_SIZE,
+        //     5,
+        // );
+        // info!(
+        //     "create_kvm_vm 2"
+        // );
+        // let firmware_ram_hva = ram_mmap(MemoryDef::SHIM_MEMORY_SIZE, -1);
+        // register_tdx_region(
+        //     &vmfd,
+        //     MemoryDef::SHIM_MEMORY_BASE,
+        //     firmware_ram_hva,
+        //     MemoryDef::SHIM_MEMORY_SIZE,
+        //     6,
+        // );
+        // info!(
+        //     "create_kvm_vm 3"
+        // );
         // Now pass to init_vm
         let kvm_cpuid = tdx_vm
             .init_vm(&kvm, &caps, &vmfd)
@@ -711,6 +737,27 @@ impl VmType for VmTDX {
             .expect("INIT_MEM_REGION ram failed");
         Ok(())
     }
+}
+
+const PAGE_SIZE: u64 = MemoryDef::PAGE_SIZE; // = 4 KiB
+
+/// Round an address down to the previous multiple of `PAGE_SIZE`
+fn align_down(addr: u64) -> u64 {
+    addr & !(PAGE_SIZE - 1)
+}
+
+/// Register a TDX region so that both guest-phys and size are page-aligned.
+fn register_tdx_region(vmfd: &VmFd, raw_gpa: u64, raw_hva: u64, raw_len: u64, slot: u32) {
+    // 1. Page-align the guest-physical start
+    let gpa_start = align_down(raw_gpa);
+    // 2. Compute how many bytes we shifted the raw start forward
+    let offset    = raw_gpa - gpa_start;
+    // 3. Compute the total span (offset + actual size), then round up
+    let size_pages = MemoryDef::align_up(offset + raw_len, PAGE_SIZE);
+    // 4. Adjust the host-virtual address down by that same offset
+    let hva_start  = raw_hva - offset;
+
+    set_user_memory_region_tdx(vmfd, gpa_start, hva_start, size_pages, slot);
 }
 
 
