@@ -3030,6 +3030,7 @@ impl MemoryDef {
     pub const QKERNEL_IMAGE_SIZE: u64 = 512 * Self::ONE_MB;
     // RDMA Local share memory
     pub const RDMA_LOCAL_SHARE_OFFSET: u64 = Self::PHY_LOWER_ADDR + Self::QKERNEL_IMAGE_SIZE;
+    #[cfg(not(feature = "tdx"))]
     pub const RDMA_LOCAL_SHARE_SIZE: u64 = 1024 * Self::ONE_MB; // 1GB
                                                                 // RDMA global share memory
     pub const RDMA_GLOBAL_SHARE_OFFSET: u64 =
@@ -3105,6 +3106,7 @@ impl MemoryDef {
 impl MemoryDef {
     pub const TDVF_OFFSET: u64 = 0xff00_0000;
     pub const TDVF_SIZE: u64 = 16 * Self::ONE_MB;
+    pub const RDMA_LOCAL_SHARE_SIZE: u64 = 508 * Self::ONE_MB; // 1GB
     pub const VM_REGS_OFFSET: u64 = Self::RDMA_GLOBAL_SHARE_OFFSET + Self::RDMA_GLOBAL_SHARE_SIZE;
     pub const VM_REGS_SIZE: u64 = Self::PAGE_SIZE_2M;
     pub const FILE_MAP_OFFSET: u64 = Self::VM_REGS_OFFSET + Self::VM_REGS_SIZE;

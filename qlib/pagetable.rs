@@ -762,7 +762,7 @@ impl PageTables {
         if start.0 & (MemoryDef::HUGE_PAGE_SIZE_1G - 1) != 0
             || end.0 & (MemoryDef::HUGE_PAGE_SIZE_1G - 1) != 0
         {
-            panic!("start/end address not 1G aligned")
+            panic!("start/end address not 1G aligned start {:x}, end {:x}", start.0, end.0)
         }
         let pt_flags = if _kernel {
             default_table_kernel()
