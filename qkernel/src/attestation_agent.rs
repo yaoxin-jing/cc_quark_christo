@@ -73,9 +73,9 @@ pub struct AttestationAgent {
 }
 
 impl AttestationAgent {
-    pub fn try_attest(config_path: Option<String>, envv: Option<Vec<String>>) {
+    pub fn try_attest(config_path: Option<String>, envv: Option<Vec<String>>) -> Result<()> {
         let mut aa: AttestationAgent = Self::new(config_path, envv)
-            .expect("AA - failed to create instance");
+            .map_err(|e| format!("AA - failed to create instance: {:?}", e))?;
         let resource_list = aa.get_resource_list();
         let mut retrived_resource: Vec<(String, Vec<u8>)> = vec![];
         debug!("VM: Required resources: {:?}", resource_list);
@@ -85,9 +85,9 @@ impl AttestationAgent {
         let bind = httpc.clone();
         let tls = tls_connection(&bind, &mut read_rec, &mut write_rec)
             .map_err(|e| {
-                panic!("VM: AttAgent - Failed to create TLS connection to KBS:{:?}",e);
-            })
-            .unwrap();
+                 format!("VM: AttAgent - Failed to create TLS connection to KBS:{:?}",e)
+
+            })?;
         let mut conn_client = ConnectionClient {
             http_client: httpc,
             tls_conn: tls,
@@ -105,9 +105,11 @@ impl AttestationAgent {
         }
         debug!("VM: AA - close connection to KBS");
         let _ = conn_client.close().map_err(|e| {
-            panic!("VM: Failed to close connection with KBS: {:?}", e);
-        });
+            format!("VM: Failed to close connection with KBS: {:?}", e)
+        })?;
         Self::install_resource(retrived_resource);
+
+        return Ok(())
     }
 
     fn install_resource(list: Vec<(String, Vec<u8>)>) {

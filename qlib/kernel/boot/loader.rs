@@ -321,7 +321,11 @@ impl Loader {
              } else {
                  Some(aa_env_conf)
              };
-            crate::try_attest(None, env_conf);
+            let res = crate::try_attest(None, env_conf);
+
+            if res.is_err() {
+                error!("attestation got error: {:?}", res.unwrap_err());
+            }
         } else {
             error!("VM: No attestation has been performed.");
         }

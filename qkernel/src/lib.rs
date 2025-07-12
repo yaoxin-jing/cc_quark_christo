@@ -783,8 +783,8 @@ pub extern "C" fn rust_main(
 //Dummy: Only to avoid issues with qvisor
 use alloc::string::String;
 use alloc::vec::Vec;
-pub fn try_attest(config_path: Option<String>, envv: Option<Vec<String>>) {
-    crate::attestation_agent::AttestationAgent::try_attest(config_path, envv);
+pub fn try_attest(config_path: Option<String>, envv: Option<Vec<String>>) -> Result<()>  {
+    return crate::attestation_agent::AttestationAgent::try_attest(config_path, envv)
 }
 
 fn StartExecProcess(fd: i32, process: Process) -> ! {

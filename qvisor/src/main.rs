@@ -104,6 +104,7 @@ use crate::qlib::linux_def::MemoryDef;
 use self::vmspace::uringMgr::*;
 use crate::kvm_vcpu::KVMVcpu;
 use vmspace::*;
+use crate::qlib::common::Result;
 
 use crate::qlib::mem::cc_allocator::*;
 use crate::qlib::kernel::kernel::kernel::Kernel;
@@ -220,4 +221,6 @@ fn main() {
     }
 }
 
-pub fn try_attest(_config_path: Option<String>, _envv: Option<Vec<String>>) {  }
+pub fn try_attest(_config_path: Option<String>, _envv: Option<Vec<String>>) -> Result<()>  {
+    return Ok(())
+}
