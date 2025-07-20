@@ -19,7 +19,7 @@ QUARK_RELEASE   = $(QTARGET_RELEASE)/quark
 VDSO            = vdso/vdso.so
 
 ARCH := ${shell uname -m}
-RUST_TOOLCHAIN  = nightly-2023-12-11-$(ARCH)-unknown-linux-gnu
+RUST_TOOLCHAIN  = nightly-2024-07-01-$(ARCH)-unknown-linux-gnu
 
 
 .PHONY: all release debug clean install qvisor_release qvisor_debug cuda_make cuda_all cleanall

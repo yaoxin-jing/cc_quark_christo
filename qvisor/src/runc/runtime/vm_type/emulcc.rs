@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use std::{os::fd::FromRawFd, sync::{atomic::Ordering, Arc}};
-
-use hashbrown::HashMap;
+use alloc::collections::btree_map::BTreeMap;
 use kvm_ioctls::{Cap, Kvm, VmFd};
 
 use crate::FD_NOTIFIER;
@@ -50,7 +49,7 @@ impl VmType for VmCcEmul {
             IDENTICAL_MAPPING.store(false, Ordering::Release);
         };
         crate::qlib::kernel::arch::tee::set_tee_type(_emul_type);
-        let mut _mem_map:HashMap<MemAreaType, MemArea> = HashMap::new();
+        let mut _mem_map:BTreeMap<MemAreaType, MemArea> = BTreeMap::new();
         _mem_map.insert(
             MemAreaType::PrivateHeapArea,
             MemArea {

@@ -38,7 +38,6 @@ extern crate bitflags;
 extern crate cache_padded;
 extern crate crossbeam_queue;
 extern crate enum_dispatch;
-extern crate hashbrown;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]

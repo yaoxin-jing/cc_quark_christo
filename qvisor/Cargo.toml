@@ -45,14 +45,11 @@ bitflags = "1"
 num_cpus = "1.13.0"
 core_affinity = "0.5.10"
 cache-padded = "1.1.1"
-#rdmaffi = { git = "https://github.com/QuarkContainer/RDMARust.git", package = "rdma-sys", version = "0.1.0" }
-#containerd-shim = { path = "/home/brad/rust/rust-extensions/crates/shim", package = "containerd-shim", version = "0.2.0" }
 containerd-shim = { git = "https://github.com/QuarkContainer/rust-extensions.git", package = "containerd-shim", version = "0.3.0" }
 oci-spec = "0.5.4"
 os_pipe = "1.0.0"
 time = { version = "0.3.7", features = ["serde", "std"] }
 uuid = { version = "0.8.2", features = ["serde", "v4"] }
-hashbrown = "0.12.3"
 enum_dispatch = { git = "https://github.com/QuarkContainer/enum_dispatch_clone.git" }
 cuda-driver-sys = { version = "0.3.0", optional = true }
 cuda-runtime-sys = { version = "0.3.0-alpha.1", optional = true }
@@ -61,8 +58,9 @@ cuda11-cublasLt-sys = { version = "0.3.0", optional = true }
 libelf = { version = "0.1.0", optional = true }
 io-uring = "0.6.3"
 vmm-sys-util = {version = "0.12.1", optional = false }
-sev = { git = "https://github.com/123abcpp/sev.git", branch = "quark_sev_rebase" }
-
+sev = { git = "https://github.com/yaoxin-jing/sev.git", branch = "quark" }
+log = "0.4.27"
+env_logger = "0.10"
 
 [features]
 cuda = ["cuda-driver-sys", "cuda-runtime-sys", "libelf", "rcublas-sys", "cuda11-cublasLt-sys"]

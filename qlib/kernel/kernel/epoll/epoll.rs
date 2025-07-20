@@ -14,15 +14,13 @@
 
 use crate::qlib::mem::stackvec::StackVec;
 use crate::qlib::mutex::*;
-//use alloc::collections::btree_map::BTreeMap;
+use alloc::collections::btree_map::BTreeMap;
+use alloc::collections::btree_map::Entry;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::sync::Arc;
 use core::any::Any;
-use core::hash::BuildHasherDefault;
 use core::ops::Deref;
-use hashbrown::hash_map::Entry;
-use hashbrown::HashMap;
 
 use super::super::super::super::common::*;
 use super::super::super::super::linux_def::*;
@@ -128,7 +126,7 @@ impl core::hash::Hasher for RawHasher {
 // collection of files to observe and their current state.
 pub struct EventPollInternal {
     pub queue: Queue,
-    pub files: QMutex<HashMap<FileIdentifier, PollEntry, BuildHasherDefault<RawHasher>>>,
+    pub files: QMutex<BTreeMap<FileIdentifier, PollEntry>>,
 
     pub lists: QMutex<PollEntryList>,
 }
@@ -136,7 +134,7 @@ pub struct EventPollInternal {
 impl Default for EventPollInternal {
     fn default() -> Self {
         let hash_map =
-            HashMap::<FileIdentifier, PollEntry, BuildHasherDefault<RawHasher>>::default();
+        BTreeMap::<FileIdentifier, PollEntry>::default();
         return Self {
             queue: Queue::default(),
             files: QMutex::new(hash_map),

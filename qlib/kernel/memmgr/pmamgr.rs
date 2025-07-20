@@ -17,7 +17,6 @@ use alloc::vec::Vec;
 use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 use spin::Mutex;
-//use hashbrown::HashMap;
 //use core::hash::BuildHasherDefault;
 //use cache_padded::CachePadded;
 
@@ -79,12 +78,7 @@ pub const REF_MAP_PARTITION_CNT: usize = 32;
 pub struct PagePool {
     //refCount for whole pma
     pub refCount: AtomicU64,
-    //pub refs: [Mutex<CachePadded<HashMap<u32, u32, BuildHasherDefault<RawHasher>>>>; REF_MAP_PARTITION_CNT],
-    //pub refs: Vec<CachePadded<Mutex<BTreeMap<u32, u32>>>>,
     pub refs: Vec<Mutex<BTreeMap<u32, u32>>>,
-    //pub refs: Vec<CachePadded<Mutex<HashMap<u32, u32>>>>,
-    //pub refs: [CachePadded<Mutex<BTreeMap<u32, u32>>>; REF_MAP_PARTITION_CNT],
-    //pub refs: [Mutex<HashMap<u32, u32>>; REF_MAP_PARTITION_CNT],
     pub allocator: AlignedAllocator,
 }
 

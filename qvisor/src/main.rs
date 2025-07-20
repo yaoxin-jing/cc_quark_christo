@@ -53,6 +53,7 @@ extern crate fs2;
 extern crate libc;
 extern crate regex;
 extern crate simplelog;
+extern crate log;
 extern crate spin;
 extern crate tabwriter;
 
@@ -183,6 +184,10 @@ pub static GUEST_HOST_SHARED_ALLOCATOR: GuestHostSharedAllocator = GuestHostShar
 
 fn main() {
     InitSingleton();
+
+    env_logger::Builder::new()
+        .filter_level(log::LevelFilter::Trace)
+        .init();
 
     let cmd;
 

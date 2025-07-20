@@ -23,7 +23,7 @@ use crate::{elf_loader::KernelELF, print::LOG, qlib, runc::runtime, tsot_agent::
             vmspace::VMSpace, KERNEL_IO_THREAD, PMA_KEEPER, QUARK_CONFIG, ROOT_CONTAINER_ID,
             SHARE_SPACE, SHARE_SPACE_STRUCT, URING_MGR, VMS};
 use addr::{Addr, PageOpts};
-use hashbrown::HashMap;
+use alloc::collections::btree_map::BTreeMap;
 use kernel::{kernel::futex, kernel::timer, task, KERNEL_STACK_ALLOCATOR, SHARESPACE};
 use kvm_ioctls::{Cap, Kvm, VmFd};
 use pagetable::{AlignedAllocator, PageTables};
@@ -59,7 +59,7 @@ impl VmType for VmNormal {
         crate::GLOBAL_ALLOCATOR.vmLaunched.store(true, Ordering::SeqCst);
         let _pod_id = args.expect("VM creation expects arguments").ID.clone();
         let default_min_vcpus = 2;
-        let mut _hshared_map:HashMap<MemAreaType, MemArea> = HashMap::new();
+        let mut _hshared_map:BTreeMap<MemAreaType, MemArea> = BTreeMap::new();
         _hshared_map.insert(
             MemAreaType::SharedHeapArea,
             MemArea{

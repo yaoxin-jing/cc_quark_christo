@@ -16,10 +16,9 @@ use std::{
     os::fd::FromRawFd,
     sync::{atomic::Ordering, Arc},
 };
-
+use alloc::collections::btree_map::BTreeMap;
 use kvm_bindings::*;
 use kvm_ioctls::{Cap, Kvm, VmFd};
-
 use super::{resources::*, VmType};
 use crate::{arch::VirtCpu, qlib::linux_def::EVENT_READ, FD_NOTIFIER};
 use crate::qlib::kernel::arch::tee::sev_snp::cpuid_page::*;
@@ -50,7 +49,6 @@ use crate::{
     CCMode, VMSpace, KERNEL_IO_THREAD, PMA_KEEPER, QUARK_CONFIG, ROOT_CONTAINER_ID, SHARE_SPACE,
     URING_MGR, VMS,
 };
-use hashbrown::HashMap;
 
 use sev::firmware::host::Firmware;
 use sev::launch::snp::*;
@@ -73,7 +71,7 @@ impl VmType for VmSevSnp {
         set_cbit_mask();
         let _pod_id = args.expect("VM creation expects arguments").ID.clone();
         let default_min_vcpus = 2;
-        let mut _hshared_map: HashMap<MemAreaType, MemArea> = HashMap::new();
+        let mut _hshared_map: BTreeMap<MemAreaType, MemArea> = BTreeMap::new();
         _hshared_map.insert(
             MemAreaType::PrivateHeapArea,
             MemArea {
@@ -183,36 +181,53 @@ impl VmType for VmSevSnp {
             error!("VM creation failed on VM-Space initialization.");
             return Err(e);
         } else {
-            info!("VM creation - VM-Space initialization finished.");
+            info!("VM creation - VM-Space initialization finished 0.");
         }
 
         {
             URING_MGR.lock();
         }
-
+        info!("VM creation - VM-Space initialization finished 1.");
         let kvm: Kvm;
         let mut vm_fd: VmFd;
         let _kvm_fd = VMS.lock().args.as_ref().unwrap().KvmFd;
+        info!("VM creation - VM-Space initialization finished 2.");
         match self.create_kvm_vm(_kvm_fd) {
             Ok((kvm_fd, mut vm_fd_tmp)) => {
                 let mut cap: kvm_enable_cap = Default::default();
+                info!("VM creation - VM-Space initialization finished 3.");
                 cap.cap = kvm_bindings::KVM_CAP_X86_DISABLE_EXITS;
                 cap.args[0] = (kvm_bindings::KVM_X86_DISABLE_EXITS_HLT
                     | kvm_bindings::KVM_X86_DISABLE_EXITS_MWAIT)
                     as u64;
+                info!("VM creation - VM-Space initialization finished 3.");
                 let sev = Firmware::open().expect("Unable to open /dev/sev");
+                info!("VM creation - VM-Space initialization finished 4.");
                 let vm_fd_mut = &mut vm_fd_tmp;
-                let launcher = Launcher::new(vm_fd_mut, sev).unwrap();
+                let launcher = match Launcher::new(vm_fd_mut, sev) {
+                    Ok(launcher) => {
+                        info!("Launcher created successfully.");
+                        launcher
+                    }
+                    Err(e) => {
+                        error!("Failed to create Launcher: {:#?}", e);
+                        error!("Likely causes: invalid SEV command, bad fd, or unsupported platform.");
+                        return Err(crate::qlib::common::Error::from(format!("snp launch error: {}", e)));
+                    }
+                };
+                info!("VM creation - VM-Space initialization finished 5.");
+                let mut policy = sev::firmware::guest::GuestPolicy(0);
+                policy.set_smt_allowed(true);
                 let start = Start::new(
-                    Policy {
-                        flags: PolicyFlags::SMT,
-                        ..Default::default()
-                    },
+                    policy,
                     [0; 16],
                 );
-                let launcher = launcher.start(vm_fd_mut, start).unwrap();
+                info!("VM creation - VM-Space initialization finished 6.");
+                let launcher = launcher.start(start, vm_fd_mut).unwrap();
                 vm_fd_mut.enable_cap(&cap).unwrap();
+                info!("VM creation - VM-Space initialization finished 7.");
                 self.launcher = Some(launcher);
+                info!("VM creation - VM-Space initialization finished 8.");
                 kvm = kvm_fd;
                 vm_fd = vm_fd_tmp;
                 info!("VM cration - kvm-vm_fd initialized.");
@@ -415,17 +430,17 @@ impl VmType for VmSevSnp {
     }
 
     fn create_kvm_vm(&mut self, kvm_fd: i32) -> Result<(Kvm, VmFd), Error> {
-        const VM_SEV_SNP: u64 = 3;
+        const VM_SEV_SNP: u64 = 4;
         let kvm = unsafe { Kvm::from_raw_fd(kvm_fd) };
-
+        info!("VM creation - create_kvm_vm  0.");
         if !kvm.check_extension(Cap::ImmediateExit) {
             panic!("Can not create VM - KVM_CAP_IMMEDIATE_EXIT is not supported.");
         }
-
+        info!("VM creation - create_kvm_vm  1.");
         let vm_fd = kvm
             .create_vm_with_type(VM_SEV_SNP)
             .map_err(|e| Error::IOError(format!("Failed to create a kvm-vm with error:{:?}", e)))?;
-
+        info!("VM creation - create_kvm_vm  2.");
         return Ok((kvm, vm_fd));
     }
 
@@ -535,7 +550,7 @@ impl VmType for VmSevSnp {
     fn post_vm_initialize(&mut self, _vm: &mut VmFd) -> Result<(), Error> {
         let finish = Finish::new(None, None, [0u8; 32]);
         let launcher = self.launcher.take().unwrap();
-        let sev: Firmware = launcher.finish(_vm, finish).unwrap();
+        let sev = launcher.finish(finish, _vm).unwrap();
         self.sev = Some(sev);
         Ok(())
     }
@@ -580,7 +595,7 @@ impl VmType for VmSevSnp {
         self.launcher
             .as_mut()
             .unwrap()
-            .update_data(_vm_fd, update_pt)
+            .update_data(update_pt, _vm_fd)
             .unwrap();
 
         //update kernel
@@ -594,7 +609,7 @@ impl VmType for VmSevSnp {
         self.launcher
             .as_mut()
             .unwrap()
-            .update_data(_vm_fd, update_kernel)
+            .update_data(update_kernel, _vm_fd)
             .unwrap();
 
         //update cpuid_page
@@ -607,7 +622,7 @@ impl VmType for VmSevSnp {
             .launcher
             .as_mut()
             .unwrap()
-            .update_data(_vm_fd, update_cpuid)
+            .update_data(update_cpuid, _vm_fd)
         {
             Ok(_) => (),
             Err(_) => {
@@ -615,7 +630,7 @@ impl VmType for VmSevSnp {
                 self.launcher
                     .as_mut()
                     .unwrap()
-                    .update_data(_vm_fd, update_cpuid)
+                    .update_data(update_cpuid, _vm_fd)
                     .unwrap();
             }
         };
@@ -627,7 +642,7 @@ impl VmType for VmSevSnp {
         self.launcher
             .as_mut()
             .unwrap()
-            .update_data(_vm_fd, update_secret)
+            .update_data(update_secret, _vm_fd)
             .unwrap();
         info!("update finished");
         Ok(())

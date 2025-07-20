@@ -14,7 +14,6 @@
 
 use std::collections::HashSet;
 use std::collections::BTreeMap;
-use hashbrown::HashMap;
 use libc::NFT_REJECT_ICMPX_ADMIN_PROHIBITED;
 use libc::user;
 use alloc::sync::Arc;
